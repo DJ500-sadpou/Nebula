@@ -1,0 +1,36 @@
+# Configuración mínima de Supabase CLI (desarrollo local y `supabase link`).
+# `supabase start` necesita Docker; en la nube no se usa: las migraciones se
+# aplican contra el proyecto real con `supabase db push` desde tu equipo.
+
+project_id = "mundo-perdido"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 17
+
+[realtime]
+enabled = true
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000/auth/callback"]
+jwt_expiry = 3600
+
+[auth.email]
+enable_signup = true
+# Fase 1: sin confirmación de correo (PLAN.md §6).
+enable_confirmations = false
+
+[auth.anonymous]
+enabled = true
+
+[storage]
+enabled = false

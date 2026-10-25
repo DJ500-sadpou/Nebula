@@ -1,0 +1,20 @@
+node_modules/
+.next/
+out/
+.vercel/
+*.tsbuildinfo
+
+# Secretos: nunca se versionan. La plantilla .env.example sí.
+.env
+.env.local
+.env.*.local
+
+# Simulación: los artefactos se regeneran con `npm run sim`
+artifacts/*.csv
+artifacts/*.json
+artifacts/*.log
+
+# Herramientas temporales de verificación
+.tmp/
+
+.DS_Store

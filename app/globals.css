@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #12100c;
+  --color-ink-soft: #1a1610;
+  --color-ink-line: #2e2619;
+  --color-parchment: #ece2cc;
+  --color-parchment-dim: #b4a88f;
+  --color-gold: #d4af37;
+  --color-gold-soft: #9c7c2a;
+  --color-blood: #b0573f;
+
+  --font-display: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+  --font-body: "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  font-family: var(--font-body);
+  background-image: radial-gradient(circle at 50% -10%, rgba(212, 175, 55, 0.09), transparent 62%);
+  background-repeat: no-repeat;
+}
+
+::selection {
+  background: rgba(212, 175, 55, 0.3);
+}
