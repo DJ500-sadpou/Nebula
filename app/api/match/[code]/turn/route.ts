@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { currentSession } from '@/lib/db/auth';
-import { resolveMatchTurn } from '@/lib/db/matches';
+import { matchModeOf, resolveMatchTurn } from '@/lib/db/matches';
+import { resolveMultiMatchTurn } from '@/lib/db/multiplayer';
+import { logError, logEvent } from '@/lib/server/log';
 import { isSameOrigin } from '@/lib/server/origin';
 
 export const dynamic = 'force-dynamic';
@@ -10,14 +12,17 @@ const STATUS: Record<string, number> = {
   not_found: 404,
   forbidden: 403,
   finished: 409,
+  not_orders: 409,
   busy: 409,
   stale: 409,
   failed: 500,
 };
 
 /**
- * Cierra el turno del jugador: sanea el plan, resuelve con el motor y aplica el
- * resultado con claim atómico. Dos clics simultáneos resuelven una sola vez
+ * Cierra el turno. En el modo de un jugador resuelve con el plan que llega
+ * aquí (rebanada de la Fase 3); en multijugador es el disparador de cierre:
+ * resuelve si todos enviaron o si el temporizador venció (§5), y si no,
+ * responde `waiting`. Dos clics simultáneos resuelven una sola vez
  * (AGENTS.md invariante 5).
  */
 export async function POST(
@@ -34,30 +39,91 @@ export async function POST(
   }
 
   const { code } = await context.params;
-  let body: unknown = {};
+  let body: Record<string, unknown> = {};
   try {
-    body = await request.json();
+    const parsed = (await request.json()) as unknown;
+    if (typeof parsed === 'object' && parsed !== null) body = parsed as Record<string, unknown>;
   } catch {
     body = {};
   }
-  const payload = body as { plan?: unknown; problemOption?: unknown; turn?: unknown };
-  const expectedTurn = Number(payload.turn);
 
+  const mode = await matchModeOf(code);
+  if (mode === 'unconfigured') {
+    return NextResponse.json(
+      { error: 'unconfigured' },
+      { status: 503 },
+    );
+  }
+
+  if (mode === 'multi') {
+    const result = await resolveMultiMatchTurn(code, session.userId);
+    if (!result.ok) {
+      const status = result.waking ? 503 : (STATUS[result.reason] ?? 500);
+      if (status === 500 || result.waking) {
+        logError('turn_failed', result.detail, {
+          code,
+          mode: 'multi',
+          reason: result.reason,
+          waking: result.waking,
+        });
+      }
+      return NextResponse.json(
+        {
+          error: result.reason,
+          detail: 'detail' in result ? result.detail : undefined,
+          waking: result.waking,
+        },
+        { status },
+      );
+    }
+    if (result.status !== 'waiting') {
+      logEvent('turn_resolved', {
+        code,
+        mode: 'multi',
+        turn: result.turn,
+        status: result.status,
+        finished: result.finished,
+      });
+    }
+    return NextResponse.json({
+      status: result.status,
+      turn: result.turn,
+      finished: result.finished,
+    });
+  }
+
+  const expectedTurn = Number(body.turn);
   const result = await resolveMatchTurn(
     code,
     session.userId,
-    payload.plan,
-    payload.problemOption,
+    body.plan,
+    body.problemOption,
     Number.isInteger(expectedTurn) ? expectedTurn : undefined,
   );
 
   if (!result.ok) {
+    const status = result.waking ? 503 : (STATUS[result.reason] ?? 500);
+    if (status === 500 || result.waking) {
+      logError('turn_failed', result.detail, {
+        code,
+        mode: 'solo',
+        reason: result.reason,
+        waking: result.waking,
+      });
+    }
     return NextResponse.json(
-      { error: result.reason, detail: result.detail },
-      { status: STATUS[result.reason] ?? 500 },
+      { error: result.reason, detail: result.detail, waking: result.waking },
+      { status },
     );
   }
 
+  logEvent('turn_resolved', {
+    code,
+    mode: 'solo',
+    turn: result.turn,
+    status: result.status,
+    finished: result.finished,
+  });
   return NextResponse.json(
     { status: result.status, turn: result.turn, finished: result.finished },
     { status: 200 },

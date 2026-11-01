@@ -1,17 +1,43 @@
 import Link from 'next/link';
+import { AutoRefresh } from '@/components/AutoRefresh';
+import { BallotPanel } from '@/components/BallotPanel';
 import { CreateMatch } from '@/components/CreateMatch';
 import { TurnPlanner } from '@/components/TurnPlanner';
 import { divinityBand } from '@/lib/db/map';
 import { capFe } from '@/lib/engine/economy';
 import { eraProgress, substageName } from '@/lib/engine/ic';
 import { problemView } from '@/lib/engine/problems';
-import { ERAS_BY_ID, MatchState, WINDOWS } from '@/lib/engine/types';
+import { ERAS_BY_ID, MatchState, WINDOWS, WindowId } from '@/lib/engine/types';
 import { actionOptions } from '@/lib/match/solo';
 
 export interface TurnChronicleLine {
   turn: number;
   publicText: string;
   privateText: string | null;
+}
+
+/** Estado multijugador visible de la mesa (Fase 4). Nada de órdenes ni Fe ajena. */
+export interface MultiTurnProps {
+  seats: {
+    seatIdx: number;
+    kind: string;
+    name: string;
+    submitted: boolean;
+    ready: boolean;
+    mine: boolean;
+    awakened: boolean;
+  }[];
+  mySubmitted: boolean;
+  ballot: {
+    open: boolean;
+    proposal: WindowId | null;
+    proposerSeat: number | null;
+    options: WindowId[];
+    myVote: WindowId | null;
+    last: { turn: number; status: string; resultWindow: WindowId | null } | null;
+    forced: boolean;
+  };
+  turnEndsAt: string | null;
 }
 
 export interface TurnScreenProps {
@@ -23,6 +49,8 @@ export interface TurnScreenProps {
   lastChronicle?: TurnChronicleLine;
   /** `review` desactiva el envío: la vista de ejemplo no escribe en la base. */
   mode?: 'play' | 'review';
+  /** Presente solo en multijugador: quién ya envió, papeleta y reloj. */
+  multi?: MultiTurnProps;
 }
 
 const BUFF_LABEL: Record<string, string> = {
@@ -46,6 +74,7 @@ export function TurnScreen({
   finished,
   lastChronicle,
   mode = 'play',
+  multi,
 }: TurnScreenProps) {
   const seat = state.seats.find((item) => item.id === mySeat);
   if (!seat) {
@@ -61,10 +90,19 @@ export function TurnScreen({
 
   const winner = state.seats.find((item) => item.id === state.winnerSeat);
   const rivals = state.seats.filter((item) => item.id !== seat.id);
+  const humans = multi?.seats.filter((item) => item.kind === 'human') ?? [];
+  const missing = humans.filter((item) => !item.submitted && !item.mine);
+  const review = mode === 'review';
+
+  // §5: la resolución espera a los humanos; el respaldo de refresco es lento.
+  const waitingForOthers = Boolean(
+    multi && !finished && humans.length > 0 && humans.some((item) => !item.submitted),
+  );
 
   return (
     <div className="space-y-8">
-      <GameHeader state={state} code={code} turnLimit={turnLimit} finished={finished} />
+      {waitingForOthers && <AutoRefresh seconds={30} />}
+      <GameHeader state={state} code={code} turnLimit={turnLimit} finished={finished} multi={multi} />
 
       {finished ? (
         <section className="space-y-4 rounded-lg border border-gold/40 bg-ink-soft p-6">
@@ -145,23 +183,40 @@ export function TurnScreen({
             <article className="rounded-lg border border-gold/25 bg-ink-soft p-5">
               <p className="text-xs uppercase tracking-[0.22em] text-gold-soft">Los otros dioses</p>
               <ul className="mt-3 divide-y divide-gold/15">
-                {rivals.map((rival) => (
-                  <li
-                    key={rival.id}
-                    className="flex items-baseline justify-between gap-3 py-2 text-sm"
-                  >
-                    <div>
-                      <p className="text-parchment">{rival.name}</p>
-                      <p className="text-xs text-parchment-dim">
-                        {rival.areaCard} · {rival.regions} regiones · {rival.temples} templos
-                        {rival.vassalOf !== null && ' · vasallo'}
-                      </p>
-                    </div>
-                    <span className="text-xs uppercase tracking-widest text-gold-soft">
-                      Divinidad {divinityBand(rival.divinity)}
-                    </span>
-                  </li>
-                ))}
+                {rivals.map((rival) => {
+                  const meta = multi?.seats.find((item) => item.seatIdx === rival.id);
+                  return (
+                    <li
+                      key={rival.id}
+                      className="flex items-baseline justify-between gap-3 py-2 text-sm"
+                    >
+                      <div>
+                        <p className="text-parchment">
+                          {rival.name}
+                          {meta?.kind === 'human' && (
+                            <span className={`ml-2 text-xs ${meta.submitted ? 'text-gold' : 'text-parchment-dim'}`}>
+                              {meta.submitted ? 'órdenes listas' : 'planificando…'}
+                            </span>
+                          )}
+                          {meta?.kind === 'dormant' && (
+                            <span
+                              className={`ml-2 text-xs ${meta.awakened ? 'text-blood' : 'text-parchment-dim'}`}
+                            >
+                              {meta.awakened ? 'dios maligno' : 'dios dormido'}
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-xs text-parchment-dim">
+                          {rival.areaCard} · {rival.regions} regiones · {rival.temples} templos
+                          {rival.vassalOf !== null && ' · vasallo'}
+                        </p>
+                      </div>
+                      <span className="text-xs uppercase tracking-widest text-gold-soft">
+                        Divinidad {divinityBand(rival.divinity)}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
               <p className="mt-3 text-xs text-parchment-dim">
                 Solo se publica lo que la mesa puede ver: ni Fe ni fidelidad ajena.
@@ -189,7 +244,55 @@ export function TurnScreen({
             </div>
           </section>
 
+          {multi && (
+            <section className="space-y-3 rounded-lg border border-gold/25 bg-ink-soft p-5">
+              <p className="text-xs uppercase tracking-[0.22em] text-gold-soft">La mesa espera</p>
+              {missing.length === 0 ? (
+                <p className="text-sm text-parchment-dim">
+                  Todos los humanos han enviado órdenes: el turno se cierra en cuanto el servidor lo
+                  reclame.
+                </p>
+              ) : (
+                <p className="text-sm text-parchment-dim">
+                  Falta{missing.length === 1 ? '' : 'n'}{' '}
+                  {missing.map((item, index) => (
+                    <span key={item.seatIdx}>
+                      {index > 0 && (index === missing.length - 1 ? ' y ' : ', ')}
+                      <span className="text-parchment">{item.name}</span>
+                    </span>
+                  ))}
+                  . Quien no envíe juega «no intervenir»: nadie bloquea la partida (§5).
+                </p>
+              )}
+              {multi.turnEndsAt && (
+                <p className="text-xs text-parchment-dim">
+                  El reloj del turno vence el{' '}
+                  {new Date(multi.turnEndsAt).toLocaleString('es-ES', {
+                    dateStyle: 'short',
+                    timeStyle: 'short',
+                  })}
+                  . Al vencer, el turno se resuelve solo en la siguiente visita.
+                </p>
+              )}
+            </section>
+          )}
+
+          {multi && !finished && (
+            <BallotPanel
+              code={code}
+              options={multi.ballot.options}
+              current={state.windowId}
+              proposal={multi.ballot.proposal}
+              proposerSeat={multi.ballot.proposerSeat}
+              myVote={multi.ballot.myVote}
+              last={multi.ballot.last}
+              forced={multi.ballot.forced}
+              disabled={review}
+            />
+          )}
+
           <TurnPlanner
+            key={`${state.turn}-${multi?.mySubmitted ? 'sent' : 'open'}`}
             code={code}
             options={actionOptions(state, seat.id)}
             problem={problemView(state, seat)}
@@ -198,6 +301,9 @@ export function TurnScreen({
             windowLabel={WINDOWS[state.windowId].label}
             turn={state.turn}
             disabled={mode === 'review'}
+            endpoint={multi ? 'orders' : 'turn'}
+            submitLabel={multi ? 'Enviar órdenes' : 'Cerrar el turno'}
+            alreadySubmitted={Boolean(multi?.mySubmitted)}
           />
         </>
       )}
@@ -219,11 +325,13 @@ function GameHeader({
   code,
   turnLimit,
   finished,
+  multi,
 }: {
   state: MatchState;
   code: string;
   turnLimit: number;
   finished: boolean;
+  multi?: MultiTurnProps;
 }) {
   const era = ERAS_BY_ID[state.era];
   const progress = Math.round(eraProgress(state) * 100);
@@ -234,7 +342,7 @@ function GameHeader({
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
           <p className="text-xs uppercase tracking-[0.25em] text-gold-soft">
-            Mesa {code} · modo «La peor carta»
+            Mesa {code} · {multi ? 'mesa compartida' : 'modo «La peor carta»'}
           </p>
           <h2 className="mt-1 font-display text-3xl text-parchment">
             Turno {turn} <span className="text-parchment-dim">de {turnLimit}</span>

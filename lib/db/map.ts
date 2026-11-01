@@ -48,6 +48,10 @@ export interface MatchConfigRow {
   turnLimit?: number;
   windowPolicy?: WindowPolicy;
   fixedWindow?: WindowId | null;
+  /** Solo modo multi: tamaño de sala, temporizador y escalera. */
+  seats?: number;
+  turnSeconds?: number;
+  unlockEvery?: number;
 }
 
 export interface SeatRow {
@@ -56,6 +60,8 @@ export interface SeatRow {
   name: string;
   area_card: string | null;
   domain_card: string | null;
+  /** §17.2: el dios dormido que despertó como maligno (columna de la Fase 1). */
+  awakened?: boolean;
 }
 
 export interface SeatStateRow {
@@ -118,6 +124,7 @@ export function stateFromRows(rows: LoadedRows): MatchState {
       kind: KIND_FROM_DB[seat.kind] ?? 'bot',
       areaCard: seat.area_card ?? 'Insectos',
       domainCard: seat.domain_card ?? 'Guerra',
+      awakened: seat.awakened === true,
       believers: state.believers,
       fidelity: Number(state.fidelity),
       fame: state.fame,
@@ -216,6 +223,7 @@ export function rowsFromState(state: MatchState, config: MatchConfigRow): StateR
       name: seat.name,
       area_card: seat.areaCard,
       domain_card: seat.domainCard,
+      awakened: seat.awakened,
     })),
     states: state.seats.map((seat) => ({
       seat_idx: seat.id,

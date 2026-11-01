@@ -45,8 +45,32 @@ export interface DimensionAverages {
   civIndex: number;
 }
 
+/** Civilizaciones activas (§5-B): humanos y bots con fieles. Ni dormidos ni malignos. */
 export function activeSeats(state: MatchState): Seat[] {
   return state.seats.filter((s) => s.believers > 0 && s.kind !== 'dormant');
+}
+
+/** Dioses dormidos que aún duermen (§17.2): generan eventos y pueden despertar. */
+export function sleepingSeats(state: MatchState): Seat[] {
+  return state.seats.filter((s) => s.kind === 'dormant' && !s.awakened);
+}
+
+/** Dioses malignos (§17.2): dormidos que despertaron. */
+export function awakenedSeats(state: MatchState): Seat[] {
+  return state.seats.filter((s) => s.kind === 'dormant' && s.awakened && s.believers > 0);
+}
+
+/**
+ * Rivales de la mesa (§10): civilizaciones más dioses malignos. Es el conjunto
+ * que sirve de diana al evento mundial, de candidatos a la guerra y de base
+ * para la victoria por vasallaje. El dormido que sigue dormido no está.
+ */
+export function rivalSeats(state: MatchState): Seat[] {
+  return state.seats.filter(
+    (s) =>
+      s.believers > 0 &&
+      (s.kind !== 'dormant' || s.awakened),
+  );
 }
 
 export function dimensionAverages(state: MatchState): DimensionAverages {
@@ -69,6 +93,23 @@ export function dimensionAverages(state: MatchState): DimensionAverages {
 /** Progreso 0..1 de la era: promedio del IC dividido por la madurez. */
 export function eraProgress(state: MatchState): number {
   return Math.min(1, dimensionAverages(state).civIndex / ERA_MATURITY);
+}
+
+/**
+ * Puntuación de cierre (§10). Vive en el motor y no en las herramientas
+ * porque también la usa la agenda del dios maligno para elegir al líder.
+ */
+export function scoreOf(state: MatchState, seat: Seat): number {
+  const vassals = state.seats.filter((s) => s.vassalOf === seat.id).length;
+  const milestones = Object.values(state.milestones).filter((id) => id === seat.id).length;
+  return (
+    vassals * 100 +
+    seat.divinity * 10 +
+    seat.believers / 10 +
+    seat.techs.length * 5 +
+    seat.relics * 5 +
+    milestones * 10
+  );
 }
 
 export function substageIndex(progress: number): number {

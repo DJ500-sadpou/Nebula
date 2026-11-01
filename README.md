@@ -8,13 +8,18 @@ modernidad. No se mueven unidades: se envían señales, milagros, bendiciones y 
 impuesto por forzar la causalidad. Gana quien vasalliza a los demás dioses, o quien más puntúa en el
 horizonte de ficción.
 
-> **Estado: Fase 3A completada; 1B y 3B pendientes en tu equipo.** El motor está cerrado y verificado
-> (500 partidas, 15/15 métricas de `REGLAS.md` §18, un *golden* por ventana) y existe la rebanada
-> jugable de **«La peor carta»**: un humano contra tres bots, doce turnos, problema de era, crónica por
-> plantillas y planificador de ocho compases. Como en la nube no hay claves, la app arranca en **modo
-> revisión**: sin base real no hay sesión ni datos, pero `/preview/turno` enseña la pantalla con una
-> partida de ejemplo generada por el motor. El checklist de lo que solo puede hacerse en tu equipo
-> está en [`PENDIENTES.md`](PENDIENTES.md).
+> **Estado: Fases 3A, 4A, 6 y 7A cerradas en la nube; 1B, 3B, 4B y 7B pendientes en tu equipo
+> (auditoría profunda del 26-10-2026 aplicada: carreras de papeleta y lobby corregidas).** El motor
+> está cerrado y verificado (15/15 métricas de `REGLAS.md` §18 re-medidas con los bots de la Fase 6,
+> un *golden* por ventana). Hay dos modos: la rebanada jugable de **«La peor carta»** (un humano
+> contra tres bots, doce turnos) y la **mesa compartida** multijugador (salas con código, relleno
+> con bots hasta 8 y dioses dormidos más allá, órdenes secretas por asiento y **papeleta de
+> ventana** votada por los humanos). Los bots ya eligen problema de era y juegan con tres
+> personalidades y dos dificultades (§17); los dioses dormidos provocan eventos del mundo y pueden
+> despertar como dioses malignos con agenda propia (§17.2). Como en la nube no hay claves, la app
+> arranca en **modo revisión**: sin base real no hay sesión ni datos, pero `/preview/turno` y
+> `/preview/lobby` enseñan ambas pantallas con datos de ejemplo. El checklist de lo que solo puede
+> hacerse en tu equipo está en [`PENDIENTES.md`](PENDIENTES.md).
 
 ---
 
@@ -52,22 +57,36 @@ horizonte de ficción.
 
 El código, el esquema SQL y todo lo verificable sin credenciales se construye y se prueba en la nube. Lo
 que necesita una cuenta, una clave o una publicación se hace en tu equipo y se sigue en
-`PENDIENTES.md` con un ID (`P-01`…`P-12`). La aplicación **no se rompe si faltan claves**: muestra el
+`PENDIENTES.md` con un ID (`P-01`…`P-15`). La aplicación **no se rompe si faltan claves**: muestra el
 estado y los pasos en lugar de una traza. Las fases que dependen de la nube están partidas en **A**
-(nube, cerrada) y **B** (tu equipo, abierta): hoy, 1A/1B y 3A/3B.
+(nube, cerrada) y **B** (tu equipo, abierta): hoy, 1A/1B, 3A/3B, 4A/4B y 7A/7B; la **Fase 6** (IA:
+personalidades, dificultades, dioses dormidos y despertar maligno) se cerró entera en la nube
+porque toda su aceptación es simulable. La 7A trajo los límites del servicio: máximo 3 mesas
+activas por jugador, retención de terminadas >30 días (solo resumen) y la página de estado
+«El servidor está despertando» (`REGLAS.md` §21).
 
 ---
 
 ## Servicios: todo con plan gratuito sin método de pago
 
-- **Vercel Hobby** — aplicación Next.js y API. *Uso personal no comercial.*
-- **Supabase Free** — Postgres, Auth y Realtime. Se pausa a los 7 días sin actividad: el cron diario
-  `/api/health` es obligatorio, no opcional.
+- **Freebuff Sites** — hosting de la aplicación Next.js en Cloudflare Workers (vía OpenNext).
+  Dominio `*.freebuff.page` + propios; 10.000 requests/día, 100.000/mes; CPU 500 s/día. La
+  sincronización de mesa va por Supabase Realtime: el *polling* es solo respaldo y lento (≥ 30 s).
+- **Supabase Free** — Postgres, Auth y Realtime; **permanece intacto, es el único backend**. Se pausa
+  a los 7 días sin actividad: el ping diario a `/api/health` es obligatorio, no opcional.
 - **Neon Free** — opcional, solo archivo de partidas cerradas y analítica.
 - **Firebase Spark** — opcional, solo notificaciones push. **No puede ser el backend**: sin Blaze no
   despliega Cloud Functions y la lógica quedaría en el cliente.
 
 Detalle y fuentes en `PLAN.md` §2.
+
+**Paso de restauración (si el proyecto se queda pausado).** El ping diario evita la pausa, pero si
+un día falla: entra en <https://supabase.com/dashboard>, abre el proyecto, **Settings → General →
+Restore project** y confirma. Unos minutos después, la URL pública responde otra vez; mientras
+despierta, la interfaz muestra «El servidor está despertando» y se reintenta sola
+(`REGLAS.md` §21.3), así que no hace falta tocar la base de datos a mano. La retención de
+partidas terminadas (>30 días → solo resumen) también corre sola al crear mesas; para barrer a
+mano: `npm run prune`.
 
 ---
 
@@ -78,15 +97,22 @@ npm ci                       # respeta el lockfile
 cp .env.example .env.local   # rellena URL y claves (P-01); nunca se versiona
 npm run dev                  # http://localhost:3000
 npm run typecheck            # tsc --noEmit
-npm test                     # 155 tests: motor, crónica, mapeo, esquema/RLS y flujo de turno en Postgres
+npm test                     # 250 tests: motor, papeleta, crónica, mapeo, esquema/RLS,
+                             # flujo de turno, flujo multijugador (lobby → papeleta → replay),
+                             # dioses dormidos y despertar, límites de servicio y retención
+                             # en Postgres 17 en memoria, reintentos de despertar y las
+                             # carreras de auditoría (papeleta única, rezagado del lobby)
 npm run build                # build de producción
 npm run sim -- 500 8 5       # simulación de 500 partidas → artifacts/
+npm run torneo -- 500 20     # torneo de la Fase 6: dificultades, personalidades y mundo de 32
+npm run prune                # retención manual: archiva terminadas >30 días (Fase 7A)
 ```
 
 Sin claves, `/` y `/login` muestran el estado de configuración y `/api/health` responde `503`;
-`/preview/turno` enseña la pantalla de turno con datos de ejemplo. Con el proyecto de Supabase
-enlazado y las migraciones aplicadas (P-01, P-02), el acceso funciona y el panteón permite empezar
-una partida de «La peor carta»; el recorrido completo está en **P-12**. El test real de privacidad es
+`/preview/turno` enseña la pantalla de turno y `/preview/lobby` la sala multijugador, ambas con
+datos de ejemplo. Con el proyecto de Supabase enlazado y las migraciones aplicadas (P-01, P-02), el
+acceso funciona, el panteón permite empezar una partida de «La peor carta» o crear una sala con
+amigos; los recorridos completos están en **P-12** y **P-13**. El test real de privacidad es
 `npm run test:rls` (P-03): sin claves termina con código 2 y no cuenta como fallo.
 
 La simulación escribe `artifacts/sim-fase0.csv` (una fila por partida) y

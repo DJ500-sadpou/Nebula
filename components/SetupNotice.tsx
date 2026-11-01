@@ -80,6 +80,10 @@ export function SetupNotice({ missing }: SetupNoticeProps) {
         Mientras tanto puedes revisar la{' '}
         <Link className="text-gold underline-offset-4 hover:underline" href="/preview/turno">
           pantalla de turno con datos de ejemplo
+        </Link>{' '}
+        y la{' '}
+        <Link className="text-gold underline-offset-4 hover:underline" href="/preview/lobby">
+          sala de espera multijugador
         </Link>
         : el motor genera la partida y no se escribe nada.
       </p>

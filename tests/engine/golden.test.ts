@@ -14,8 +14,15 @@ import { MatchState, WINDOW_LADDER, WindowId } from '../../lib/engine/types';
  *
  * Regeneradas en Fase 2 al añadir `windowPolicy` y `fixedWindow` al estado: la
  * huella cubre el estado serializado, así que dos campos nuevos la cambian
- * aunque la partida sea idéntica (mismos 39/41/43 turnos, misma era, mismo
- * ganador y los mismos textos de evento, con su huella intacta).
+ * aunque la partida sea idéntica.
+ *
+ * Regeneradas de nuevo en Fase 6 (DECISIONES D65, D66 y D67) por el reequilibrio
+ * de personalidades (sabores acotados, problemas de era para bots, costes de
+ * `investigar`/`hito cultural`) y por el campo `awakened` del asiento, que
+ * entra en la huella. La partida se movió poco y nada al azar: mismas turnadas
+ * (39/41/43), mismas eras, mismas ventanas y mismo ganador en 1 y 42; el cambio
+ * de verdad es el ganador de la semilla 7 (asiento 0 → 1) y un evento más en
+ * la 42. La banda §18 se re-midió completa con la nueva política (REGLAS §18.1).
  */
 
 function play(seed: number) {
@@ -34,9 +41,9 @@ function play(seed: number) {
 }
 
 const GOLDEN: Record<number, { digest: string; turns: number; era: string; events: number; winner: number }> = {
-  1: { digest: 'ccde120249a6c262', turns: 39, era: 'modernidad', events: 55, winner: 3 },
-  7: { digest: '9fa901a8c6c6c1c8', turns: 41, era: 'modernidad', events: 57, winner: 0 },
-  42: { digest: '7f9bc2f602c93676', turns: 43, era: 'modernidad', events: 59, winner: 3 },
+  1: { digest: '52eac5ae4f885ad6', turns: 39, era: 'modernidad', events: 55, winner: 3 },
+  7: { digest: '2cb7b59b4ce4972b', turns: 41, era: 'modernidad', events: 57, winner: 1 },
+  42: { digest: 'f1b6ed780e787d70', turns: 43, era: 'modernidad', events: 60, winner: 3 },
 };
 
 describe('golden: partidas completas', () => {
@@ -96,13 +103,13 @@ function playWindow(windowId: WindowId): { state: MatchState; turns: number } {
 }
 
 const WINDOW_GOLDEN: Record<WindowId, { digest: string; turns: number; fictionDay: number; era: string }> = {
-  '1d': { digest: 'a9135149aa6239e1', turns: 24, fictionDay: 24, era: 'tribal' },
-  '7d': { digest: '5e88aa432a65f923', turns: 24, fictionDay: 168, era: 'reinos' },
-  '30d': { digest: 'ed512fac6f3859f4', turns: 24, fictionDay: 720, era: 'modernidad' },
-  '3m': { digest: '3af7e1f378033683', turns: 24, fictionDay: 2184, era: 'modernidad' },
-  '6m': { digest: '7d2fd92d3c7f9d55', turns: 24, fictionDay: 4368, era: 'modernidad' },
-  '1y': { digest: '0cfc490f376c520f', turns: 24, fictionDay: 8760, era: 'modernidad' },
-  '3y': { digest: '378753129d62f61a', turns: 10, fictionDay: 10950, era: 'reinos' },
+  '1d': { digest: '3d7c0acfc349678f', turns: 24, fictionDay: 24, era: 'tribal' },
+  '7d': { digest: '547b2c830b505a6b', turns: 24, fictionDay: 168, era: 'reinos' },
+  '30d': { digest: '804b3f2b270a9923', turns: 24, fictionDay: 720, era: 'modernidad' },
+  '3m': { digest: 'd44f0ed0bb0ead48', turns: 24, fictionDay: 2184, era: 'modernidad' },
+  '6m': { digest: '8d3ae3b391ab0c03', turns: 24, fictionDay: 4368, era: 'modernidad' },
+  '1y': { digest: 'a566d87b1bea4eb3', turns: 24, fictionDay: 8760, era: 'modernidad' },
+  '3y': { digest: '5d4ba7bccb1e67c4', turns: 10, fictionDay: 10950, era: 'reinos' },
 };
 
 describe('golden: una partida por ventana', () => {

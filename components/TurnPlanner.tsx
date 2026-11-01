@@ -16,6 +16,12 @@ interface TurnPlannerProps {
   turn: number;
   /** La vista de revisión no envía nada: no hay partida detrás. */
   disabled?: boolean;
+  /** `turn` = rebanada de un jugador (resuelve al cerrar); `orders` = multijugador
+   * (las órdenes esperan a la mesa; §5). */
+  endpoint?: 'turn' | 'orders';
+  submitLabel?: string;
+  /** En multijugador: ya enviaste tus órdenes y esperas a los demás. */
+  alreadySubmitted?: boolean;
 }
 
 interface PlanItem {
@@ -47,11 +53,15 @@ export function TurnPlanner({
   windowLabel,
   turn,
   disabled = false,
+  endpoint = 'turn',
+  submitLabel = 'Cerrar el turno',
+  alreadySubmitted = false,
 }: TurnPlannerProps) {
   const [plan, setPlan] = useState<PlanItem[]>([]);
   const [choice, setChoice] = useState<string>('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [waiting, setWaiting] = useState<string | null>(null);
   const router = useRouter();
 
   const costOf = (id: string) => options.find((option) => option.id === id)?.cost ?? 0;
@@ -95,21 +105,35 @@ export function TurnPlanner({
   async function submit() {
     setBusy(true);
     setError(null);
+    setWaiting(null);
     try {
-      const response = await fetch(`/api/match/${code}/turn`, {
+      const response = await fetch(`/api/match/${code}${endpoint === 'orders' ? '/orders' : '/turn'}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ plan, problemOption: choice || undefined, turn }),
       });
       if (!response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          waking?: boolean;
+        };
         if (payload.error === 'stale' || payload.error === 'busy') {
           setError('Ese turno ya se cerró en otra pestaña. Actualizando el estado…');
           router.refresh();
           return;
         }
-        setError(`No se pudo cerrar el turno (${payload.error ?? response.status}).`);
+        if (payload.waking) {
+          setError(
+            'El servidor está despertando: reintenta en unos segundos. Reenviar unas órdenes ya guardadas es seguro.',
+          );
+          return;
+        }
+        setError(`No se pudo ${endpoint === 'orders' ? 'enviar las órdenes' : 'cerrar el turno'} (${payload.error ?? response.status}).`);
         return;
+      }
+      const payload = (await response.json().catch(() => ({}))) as { status?: string };
+      if (endpoint === 'orders' && payload.status === 'waiting') {
+        setWaiting('Órdenes enviadas. La mesa juega cuando todos hayan enviado (o venza el reloj).');
       }
       setPlan([]);
       setChoice('');
@@ -274,16 +298,25 @@ export function TurnPlanner({
           <button
             type="button"
             onClick={submit}
-            disabled={busy || disabled}
+            disabled={busy || disabled || alreadySubmitted}
             className="cursor-pointer rounded border border-gold bg-gold px-5 py-2.5 text-sm font-semibold text-ink transition-colors hover:bg-parchment disabled:cursor-wait disabled:opacity-60"
           >
-            {disabled ? 'Vista de revisión' : busy ? 'El mundo gira…' : 'Cerrar el turno'}
+            {disabled
+              ? 'Vista de revisión'
+              : busy
+                ? 'El mundo gira…'
+                : alreadySubmitted
+                  ? 'Órdenes enviadas'
+                  : submitLabel}
           </button>
         </div>
       </section>
 
       {error && (
         <p className="rounded border border-blood/40 bg-ink-soft px-4 py-3 text-sm text-blood">{error}</p>
+      )}
+      {waiting && (
+        <p className="rounded border border-gold/40 bg-ink-soft px-4 py-3 text-sm text-gold-soft">{waiting}</p>
       )}
     </div>
   );

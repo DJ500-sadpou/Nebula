@@ -1,8 +1,8 @@
-import { planFor } from '../bots/policy';
+import { chooseProblemOption, planFor } from '../bots/policy';
 import { passiveForArea } from '../engine/areas';
 import { ACTIONS, isWindowAllowed } from '../engine/content';
-import { activeSeats } from '../engine/ic';
-import { createInitialState, resolveTurn, scoreOf } from '../engine/resolve';
+import { activeSeats, scoreOf } from '../engine/ic';
+import { createInitialState, resolveTurn } from '../engine/resolve';
 import {
   BeatAction,
   Channel,
@@ -145,8 +145,13 @@ export function resolveSoloTurn(
     if (seat.id === humanSeat) {
       return problemOption ? { seatId: seat.id, plan, problemOption } : { seatId: seat.id, plan };
     }
-    const policy = planFor(state, seat);
-    return { seatId: seat.id, plan: policy.plan };
+    // §17.1: el bot de la mesa juega como Corrupto (D63) y desde la Fase 6
+    // elige problema de era según su personalidad (D64, cierra D51).
+    const policy = planFor(state, seat, 'corrupto');
+    const choice = chooseProblemOption(state, seat);
+    return choice
+      ? { seatId: seat.id, plan: policy.plan, problemOption: choice }
+      : { seatId: seat.id, plan: policy.plan };
   });
 
   const next = resolveTurn(state, orders);
@@ -158,7 +163,8 @@ export function resolveSoloTurn(
     let best: number | null = null;
     let bestScore = -Infinity;
     for (const seat of next.seats) {
-      if (seat.kind === 'dormant') continue;
+      // Puntúan civilizaciones y dioses malignos; el dormido que duerme no.
+      if (seat.kind === 'dormant' && !seat.awakened) continue;
       const value = scoreOf(next, seat);
       if (value > bestScore) {
         bestScore = value;

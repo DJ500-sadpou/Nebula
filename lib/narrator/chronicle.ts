@@ -77,7 +77,7 @@ export function chronicleFor(state: MatchState, seatId: number): TurnChronicle {
   const system = fillTemplate(pick(SYSTEM, rng(state.seed, state.turn, 703)), base);
 
   const notable = publicEvents.some((event) =>
-    ['milestone', 'clash', 'war', 'war_declared', 'era', 'peace', 'stall'].includes(event.kind),
+    ['milestone', 'clash', 'war', 'war_declared', 'era', 'peace', 'stall', 'awakening'].includes(event.kind),
   );
   const aldinal = notable
     ? fillTemplate(pick(ALDIN, rng(state.seed, state.turn, 704)), base)

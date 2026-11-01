@@ -1,4 +1,3 @@
-import { randomInt, randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { digestState } from '../engine/digest';
 import { MatchState, TurnEvent } from '../engine/types';
@@ -10,6 +9,8 @@ import {
   sanitizeProblemOption,
 } from '../match/solo';
 import { createAdminSupabase } from './admin';
+import { randomInt, randomIntRange, randomUUID } from '../server/random';
+import { isWakingError, withRetry } from '../server/retry';
 import {
   LoadedRows,
   MatchRow,
@@ -46,31 +47,104 @@ export interface MatchView {
 
 export type CreateResult =
   | { ok: true; code: string }
-  | { ok: false; reason: 'unconfigured' | 'failed'; detail?: string };
+  | {
+      ok: false;
+      reason: 'unconfigured' | 'failed' | 'limit';
+      detail?: string;
+      /** La base no respondió como un despertar de Supabase (§21.3). */
+      waking?: boolean;
+    };
+
+/** Resumen que queda de una partida archivada por retención (§21.2). */
+export interface ArchivedSummary {
+  mode: string | null;
+  seats: number | null;
+  turns: number | null;
+  era: string | null;
+  fictionDay: number | null;
+  winnerSeat: number | null;
+  winnerName: string | null;
+  createdAt: string | null;
+  closedAt: string | null;
+}
+
+export interface ArchivedView {
+  code: string;
+  closedAt: string | null;
+  summary: ArchivedSummary | null;
+}
 
 export type LoadResult =
   | { ok: true; view: MatchView }
-  | { ok: false; reason: 'unconfigured' | 'not_found' | 'forbidden' | 'failed' };
+  | {
+      ok: false;
+      reason: 'unconfigured' | 'not_found' | 'forbidden' | 'failed';
+      waking?: boolean;
+    }
+  | { ok: false; reason: 'archived'; archived: ArchivedView };
 
 export type TurnResult =
   | { ok: true; status: 'applied' | 'replayed'; finished: boolean; turn: number }
   | {
       ok: false;
-      reason: 'unconfigured' | 'not_found' | 'forbidden' | 'finished' | 'busy' | 'stale' | 'failed';
+      reason:
+        | 'unconfigured'
+        | 'not_found'
+        | 'forbidden'
+        | 'finished'
+        | 'busy'
+        | 'stale'
+        | 'failed';
       detail?: string;
+      waking?: boolean;
     };
+
+/** El guard de §21.1 (máximo 3 mesas activas) llega como excepción SQL. */
+function isTooManyActive(error: { message?: string }): boolean {
+  return (error.message ?? '').includes('too_many_active');
+}
+
+/** Proyección pura del resumen archivado: tolera columnas a medias. */
+export function archivedViewOf(matchRow: {
+  code?: string | null;
+  closed_at?: string | null;
+  summary?: unknown;
+}): ArchivedView {
+  const raw = matchRow.summary;
+  const record =
+    typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : null;
+  return {
+    code: matchRow.code ?? '',
+    closedAt: matchRow.closed_at ?? null,
+    summary: record
+      ? {
+          mode: typeof record.mode === 'string' ? record.mode : null,
+          seats: typeof record.seats === 'number' ? record.seats : null,
+          turns: typeof record.turns === 'number' ? record.turns : null,
+          era: typeof record.era === 'string' ? record.era : null,
+          fictionDay: typeof record.fictionDay === 'number' ? record.fictionDay : null,
+          winnerSeat: typeof record.winnerSeat === 'number' ? record.winnerSeat : null,
+          winnerName: typeof record.winnerName === 'string' ? record.winnerName : null,
+          createdAt: typeof record.createdAt === 'string' ? record.createdAt : null,
+          closedAt: typeof record.closedAt === 'string' ? record.closedAt : null,
+        }
+      : null,
+  };
+}
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
-function randomCode(): string {
+/** Código de sala de 6 símbolos sin ambiguos. Compartido con el modo multi. */
+export function randomCode(): string {
   let code = '';
   for (let i = 0; i < 6; i += 1) code += CODE_ALPHABET[randomInt(CODE_ALPHABET.length)];
   return code;
 }
 
-/** Semilla de partida. `crypto` vive en la capa de datos, nunca en el motor. */
-function randomSeed(): number {
-  return randomInt(1, 2_000_000_000);
+/** Semilla de partida. El azar criptográfico vive en la capa de datos, nunca en
+ * el motor; se usa Web Crypto para que sea compatible con Workers. */
+export function randomSeed(): number {
+  return randomIntRange(1, 2_000_000_000);
 }
 
 interface MatchRowWithCode extends MatchRow {
@@ -81,49 +155,70 @@ async function loadRows(
   admin: SupabaseClient,
   code: string,
 ): Promise<{ match: MatchRowWithCode; rows: LoadedRows; seats: SeatWithUser[] } | null> {
-  const { data: match, error } = await admin
-    .from('matches')
-    .select('*')
-    .eq('code', code)
-    .maybeSingle();
+  // Lectura idempotente: se reintenta si la base parece despertar (§21.3).
+  return withRetry(async () => {
+    const { data: match, error } = await admin
+      .from('matches')
+      .select('*')
+      .eq('code', code)
+      .maybeSingle();
 
-  if (error) throw new Error(`No se pudo leer la partida: ${error.message}`);
-  if (!match) return null;
+    if (error) throw new Error(`No se pudo leer la partida: ${error.message}`);
+    if (!match) return null;
 
-  const matchRow = match as unknown as MatchRowWithCode;
+    const matchRow = match as unknown as MatchRowWithCode;
 
-  const [seatsResult, statesResult, publicsResult, milestonesResult] = await Promise.all([
+    const [seatsResult, statesResult, publicsResult, milestonesResult] = await Promise.all([
+      admin
+        .from('seats')
+        .select('seat_idx, kind, name, area_card, domain_card, user_id, awakened')
+        .eq('match_id', matchRow.id)
+        .order('seat_idx'),
+      admin.from('seat_state').select('*').eq('match_id', matchRow.id).order('seat_idx'),
+      admin.from('seat_public').select('*').eq('match_id', matchRow.id).order('seat_idx'),
+      admin.from('milestones').select('key, claimed_by_seat').eq('match_id', matchRow.id),
+    ]);
+
+    if (seatsResult.error || statesResult.error || publicsResult.error || milestonesResult.error) {
+      throw new Error('No se pudieron leer los asientos de la partida');
+    }
+
+    const seats = (seatsResult.data ?? []) as unknown as SeatWithUser[];
+    const milestoneRows = (milestonesResult.data ?? []) as unknown as {
+      key: string;
+      claimed_by_seat: number;
+    }[];
+    const milestones: Record<string, number> = {};
+    for (const row of milestoneRows) milestones[row.key] = row.claimed_by_seat;
+
+    const rows: LoadedRows = {
+      match: matchRow,
+      seats,
+      states: (statesResult.data ?? []) as unknown as SeatStateRow[],
+      publics: (publicsResult.data ?? []) as unknown as SeatPublicRow[],
+      milestones,
+    };
+
+    return { match: matchRow, rows, seats };
+  });
+}
+
+/** Modo de la mesa (`config.mode`): decide qué flujo de resolución usa la API. */
+export async function matchModeOf(
+  code: string,
+): Promise<'solo' | 'multi' | 'unknown' | 'unconfigured'> {
+  const admin = createAdminSupabase();
+  if (!admin) return 'unconfigured';
+  const { data, error } = await withRetry(async () =>
     admin
-      .from('seats')
-      .select('seat_idx, kind, name, area_card, domain_card, user_id')
-      .eq('match_id', matchRow.id)
-      .order('seat_idx'),
-    admin.from('seat_state').select('*').eq('match_id', matchRow.id).order('seat_idx'),
-    admin.from('seat_public').select('*').eq('match_id', matchRow.id).order('seat_idx'),
-    admin.from('milestones').select('key, claimed_by_seat').eq('match_id', matchRow.id),
-  ]);
-
-  if (seatsResult.error || statesResult.error || publicsResult.error || milestonesResult.error) {
-    throw new Error('No se pudieron leer los asientos de la partida');
-  }
-
-  const seats = (seatsResult.data ?? []) as unknown as SeatWithUser[];
-  const milestoneRows = (milestonesResult.data ?? []) as unknown as {
-    key: string;
-    claimed_by_seat: number;
-  }[];
-  const milestones: Record<string, number> = {};
-  for (const row of milestoneRows) milestones[row.key] = row.claimed_by_seat;
-
-  const rows: LoadedRows = {
-    match: matchRow,
-    seats,
-    states: (statesResult.data ?? []) as unknown as SeatStateRow[],
-    publics: (publicsResult.data ?? []) as unknown as SeatPublicRow[],
-    milestones,
-  };
-
-  return { match: matchRow, rows, seats };
+      .from('matches')
+      .select('config')
+      .eq('code', code.toUpperCase())
+      .maybeSingle(),
+  );
+  if (error || !data) return 'unknown';
+  const mode = (data as { config: { mode?: string } }).config?.mode;
+  return mode === 'multi' ? 'multi' : mode === 'peor_carta' ? 'solo' : 'unknown';
 }
 
 export async function createSoloMatch(userId: string): Promise<CreateResult> {
@@ -150,6 +245,14 @@ export async function createSoloMatch(userId: string): Promise<CreateResult> {
 
     if (!error) return { ok: true, code };
     lastDetail = error.message;
+    // §21.1: el guard SQL del límite de mesas activas.
+    if (isTooManyActive(error)) {
+      return { ok: false, reason: 'limit', detail: 'too_many_active' };
+    }
+    // §21.3: la base despertaba mientras se creaba la mesa.
+    if (isWakingError(error)) {
+      return { ok: false, reason: 'failed', detail: lastDetail, waking: true };
+    }
     // 23505 = código repetido: se prueba otro. Cualquier otro error es real.
     if (error.code !== '23505') break;
   }
@@ -167,29 +270,41 @@ export async function loadMatchForUser(
   let loaded: Awaited<ReturnType<typeof loadRows>>;
   try {
     loaded = await loadRows(admin, code.toUpperCase());
-  } catch {
-    return { ok: false, reason: 'failed' };
+  } catch (error) {
+    return { ok: false, reason: 'failed', waking: isWakingError(error) };
   }
   if (!loaded) return { ok: false, reason: 'not_found' };
 
   const mySeat = loaded.seats.find((seat) => seat.user_id === userId);
   if (!mySeat) return { ok: false, reason: 'forbidden' };
 
-  const [chronicleResult, eventsResult] = await Promise.all([
-    admin
-      .from('chronicle')
-      .select('turn, public_text, private')
-      .eq('match_id', loaded.match.id)
-      .order('turn'),
-    admin
-      .from('turn_events')
-      .select('turn, visibility, seat_idx, kind, text, payload')
-      .eq('match_id', loaded.match.id)
-      .order('id'),
-  ]);
+  // §21.2: una partida archivada solo conserva su resumen.
+  if (loaded.match.status === 'closed') {
+    return { ok: false, reason: 'archived', archived: archivedViewOf(loaded.match) };
+  }
+
+  const current = loaded;
+  const [chronicleResult, eventsResult] = await withRetry(() =>
+    Promise.all([
+      admin
+        .from('chronicle')
+        .select('turn, public_text, private')
+        .eq('match_id', current.match.id)
+        .order('turn'),
+      admin
+        .from('turn_events')
+        .select('turn, visibility, seat_idx, kind, text, payload')
+        .eq('match_id', current.match.id)
+        .order('id'),
+    ]),
+  );
 
   if (chronicleResult.error || eventsResult.error) {
-    return { ok: false, reason: 'failed' };
+    return {
+      ok: false,
+      reason: 'failed',
+      waking: isWakingError(chronicleResult.error ?? eventsResult.error),
+    };
   }
 
   const chronicleRows = (chronicleResult.data ?? []) as unknown as {
@@ -264,7 +379,12 @@ export async function resolveMatchTurn(
   try {
     loaded = await loadRows(admin, code.toUpperCase());
   } catch (error) {
-    return { ok: false, reason: 'failed', detail: (error as Error).message };
+    return {
+      ok: false,
+      reason: 'failed',
+      detail: (error as Error).message,
+      waking: isWakingError(error),
+    };
   }
   if (!loaded) return { ok: false, reason: 'not_found' };
 
@@ -298,19 +418,23 @@ export async function resolveMatchTurn(
     const { events: _events, ...stateWithoutEvents } = result.state;
     const payloadState = { ...stateWithoutEvents, events: [] };
 
-    const { data: applied, error: applyError } = await admin.rpc('apply_turn', {
-      p_match: loaded.match.id,
-      p_turn: turn,
-      p_payload: {
-        digest: digestState(result.state),
-        state: payloadState,
-        events: result.events,
-        chronicle: {
-          public: result.chronicle.publicText,
-          private: { [String(mySeat.seat_idx)]: result.chronicle.privateText },
+    // `apply_turn` es idempotente (replay), así que se puede reintentar si la
+    // base despertaba a mitad de la escritura (§21.3).
+    const { data: applied, error: applyError } = await withRetry(async () =>
+      admin.rpc('apply_turn', {
+        p_match: loaded.match.id,
+        p_turn: turn,
+        p_payload: {
+          digest: digestState(result.state),
+          state: payloadState,
+          events: result.events,
+          chronicle: {
+            public: result.chronicle.publicText,
+            private: { [String(mySeat.seat_idx)]: result.chronicle.privateText },
+          },
         },
-      },
-    });
+      }),
+    );
 
     if (applyError) throw new Error(applyError.message);
 
@@ -322,6 +446,11 @@ export async function resolveMatchTurn(
     };
   } catch (error) {
     await admin.rpc('release_turn', { p_match: loaded.match.id });
-    return { ok: false, reason: 'failed', detail: (error as Error).message };
+    return {
+      ok: false,
+      reason: 'failed',
+      detail: (error as Error).message,
+      waking: isWakingError(error),
+    };
   }
 }

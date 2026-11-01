@@ -28,6 +28,7 @@ export function makeSeat(over: Partial<Seat> = {}): Seat {
     debuffMissionTurn: null,
     vassalOf: null,
     createdAtTurn: 1,
+    awakened: false,
     ...over,
   };
 }

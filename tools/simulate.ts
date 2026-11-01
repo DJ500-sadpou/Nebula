@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { planFor } from '../lib/bots/policy';
+import { chooseProblemOption, planFor } from '../lib/bots/policy';
 import { evaluateDebuff } from '../lib/engine/ic';
 import { rng } from '../lib/engine/rng';
 import {
@@ -108,7 +108,13 @@ function runMatch(seed: number): MatchRow {
       const skip =
         seat.kind === 'human' &&
         rng(state.seed, state.turn, 500 + seat.id)() < INATTENTION_HUMAN;
-      return skip ? { seatId: seat.id, plan: [] } : planFor(state, seat);
+      if (skip) return { seatId: seat.id, plan: [] };
+      // §17.1: los bots de la mesa juegan como Corrupto (D63); el humano
+      // simulado no mira bandas rivales. Todos eligen problema de era (D64).
+      const difficulty = seat.kind === 'bot' ? 'corrupto' : 'normal';
+      const order = planFor(state, seat, difficulty);
+      const choice = chooseProblemOption(state, seat);
+      return choice ? { ...order, problemOption: choice } : order;
     });
     const beatsPerSeat = orders.map((order) => new Set(order.plan.map((p) => p.beat)));
 
@@ -295,6 +301,10 @@ const summary = {
 console.log(JSON.stringify(summary, null, 2));
 
 mkdirSync('artifacts', { recursive: true });
+// El resumen también se guarda como artefacto: README/PLAN/REGLAS (§18.1) lo
+// citan como `artifacts/sim-fase0-resumen.json` y regenerarlo no debía exigir
+// redirigir la consola a mano (hallazgo de la auditoría del 26-10-2026).
+writeFileSync('artifacts/sim-fase0-resumen.json', `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
 const header = Object.keys(rows[0] ?? {}).join(',');
 const body = rows
   .map((row) =>
@@ -304,5 +314,6 @@ const body = rows
   )
   .join('\n');
 writeFileSync('artifacts/sim-fase0.csv', `${header}\n${body}\n`, 'utf8');
-// A stderr para que la salida estándar sea JSON puro y se pueda guardar tal cual.
+// A stderr para que la salida estándar siga siendo JSON puro.
 console.error('CSV: artifacts/sim-fase0.csv');
+console.error('Resumen: artifacts/sim-fase0-resumen.json');

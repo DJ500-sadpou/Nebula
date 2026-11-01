@@ -12,7 +12,9 @@
     "test:watch": "vitest",
     "test:rls": "tsx tests/rls/two-accounts.ts",
     "typecheck": "tsc --noEmit",
-    "sim": "tsx tools/simulate.ts"
+    "sim": "tsx tools/simulate.ts",
+    "torneo": "tsx tools/tournament.ts",
+    "prune": "tsx tools/prune.ts"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",

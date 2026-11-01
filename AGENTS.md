@@ -50,12 +50,14 @@ lib/engine/     puro y testeable. Nada de red, nada de BD, nada de reloj.
 lib/bots/       clientes del motor: reciben estado público, devuelven órdenes legales.
 lib/narrator/   plantillas deterministas (+ capa LLM opcional y aislada).
 lib/match/      orquestación de la mesa: modo «La peor carta», saneado del plan y cierre.
-lib/server/     utilidades de servidor sin datos (comprobación de mismo origen).
+lib/server/     utilidades de servidor sin datos (mismo origen, retry/backoff, azar criptográfico, logs).
 lib/db/         env, clientes Supabase, mapeos estado↔filas y repositorio. Solo aquí se habla con la base.
-supabase/       config local y migraciones SQL incrementales.
+supabase/       config local y migraciones SQL incrementales (7 a la fecha).
 tests/engine/   unitarios + golden por ventana.
 tests/narrator/ plantillas y crónica determinista.
-tests/db/       entorno, auditoría de RLS, mapeo y flujo de turno en Postgres 17 (PGlite, sin credenciales).
+tests/db/       entorno, auditoría de RLS, mapeo y flujos (turno, lobby, límites) en Postgres 17 (PGlite, sin credenciales).
+tests/match/    orquestación pura: lobby, relleno y partidas archivadas.
+tests/server/   retry/backoff del despertar de Supabase.
 tests/rls/      test real de dos cuentas (script manual, P-03).
 ```
 

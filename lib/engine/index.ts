@@ -5,5 +5,7 @@ export * from './ic';
 export * from './areas';
 export * from './content';
 export * from './problems';
+export * from './ballot';
+export * from './dormants';
 export * from './resolve';
 export * from './digest';

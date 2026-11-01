@@ -275,7 +275,11 @@ export const ACTIONS: Record<string, ActionDef> = {
     channel: 'palabra',
     beats: 1,
     minWindow: '1d',
-    cost: (seat) => 11 + 4 * seat.techs.length,
+    // Tuning de Fase 6 (D28/D67): con los bots eligiendo problemas de era (D64)
+    // el Fe disponible para las dimensiones baja y la barra tribal se iba al
+    // turno 18,4 (banda §18: 10–16). Se abarata la investigación para
+    // devolverla a banda; medido en REGLAS §18.1.
+    cost: (seat) => 8 + 3.2 * seat.techs.length,
     available: (seat, state) => nextTechId(seat, state.era) !== null,
     effect: (seat, state) => {
       const tech = nextTechId(seat, state.era);
@@ -289,7 +293,8 @@ export const ACTIONS: Record<string, ActionDef> = {
     channel: 'obra',
     beats: 2,
     minWindow: '7d',
-    cost: () => 25,
+    // Tuning de Fase 6 (D28/D67): mismo ajuste que `investigar`.
+    cost: () => 16,
     available: (seat, state) => nextCultureId(seat, state.era) !== null,
     effect: (seat, state) => {
       const item = nextCultureId(seat, state.era);
@@ -304,6 +309,11 @@ export const ACTIONS: Record<string, ActionDef> = {
     channel: 'heroe',
     beats: 3,
     minWindow: '30d',
+    // Tuning de Fase 6 (D65): el coste de la tabla original se conserva; lo
+    // que frena la bola de nieve es el TOPE de una compra por turno en la
+    // política (lib/engine: ACTION_CAPS). Con 2/turno y coste menguante, el
+    // Expansivo llegó a 56 regiones y al 86 % de victorias: peor que el
+    // hallazgo §4.6 que se pretendía arreglar.
     cost: () => 60,
     effect: (seat) => {
       seat.regions += 1;

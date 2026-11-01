@@ -27,8 +27,8 @@ Convención: `[N]` = valor numérico ajustable. Todo el texto de juego va en esp
 |---|---|---|
 | `humano` | Jugador real | Envía órdenes en su turno |
 | `bot` | Lobby incompleto | IA de utilidad, juega con las mismas reglas |
-| `dormido` | Lobby muy incompleto o abandono | No actúa; deriva, genera eventos y puede "despertar" como dios maligno |
-| `vacio` | Sin asignar | Actúa como `dormido` con menor probabilidad de evento |
+| `dormido` | Lobby muy incompleto (mesas de más de 8 asientos) | No actúa; deriva, genera eventos y puede "despertar" como dios maligno |
+| `vacio` | Sin asignar, durante el lobby | Al arrancar la mesa desaparece: todo asiento queda humano, bot o dormido |
 
 - Tamaño de partida configurable: **4 a 32 asientos**. Mesa por defecto: **8 asientos**
   (2–3 humanos + 5–6 IA). Los 32 asientos quedan como modo "mundo completo".
@@ -39,6 +39,9 @@ Convención: `[N]` = valor numérico ajustable. Todo el texto de juego va en esp
   Con 8 se juega en ~35 min; con 32, en ~90. El techo de 32 es fiel a la novela; la mesa normal es 8.
 - Al iniciar, cada asiento roba **1 Área Pequeña** de la baraja de 32 y **1 Dominio Único**.
 - Si un humano abandona, su asiento pasa a `bot` en el turno siguiente (nunca se borra: sus fieles siguen).
+- **Relleno al arrancar** (§17): los asientos libres se cubren con bots hasta la mesa de referencia
+  de 8 (humanos presentes + bots); en mesas mayores, los que quedan más allá de 8 duermen como dioses
+  dormidos. En mesas de hasta 8 asientos, todos los libres son bots, como desde la Fase 4.
 
 ---
 
@@ -311,6 +314,8 @@ las largas son el libro de historia.
   reservan el último compás para una acción reactiva si la ventana es ≤ `30d`.
 - Los dioses dormidos generan un evento **por compás** en ventanas largas (15 % en cortas), de modo que
   un trienio no es un turno vacío.
+- Los eventos de dormidos se aplican junto al evento mundial (§8, paso 7), después de compases y
+  crecimiento: la equivalencia de compases (A.12) queda intacta.
 
 ### A.9 Fin de partida
 
@@ -882,15 +887,36 @@ Esto se implementa en la base de datos, no en el cliente (ver `PLAN.md` §4).
 - **Utilidad** sobre el conjunto de acciones legales: `valor = (ΔFe esperado × w1) + (Δfieles × w2)
   + (Δpoder × w3) + (progreso de objetivo × w4) − riesgo`.
 - **3 personalidades:** Expansivo (peso territorio), Fanático (peso fieles/fama), Maquiavelo (peso
-  profecías, susurros y sabotaje).
-- **2 dificultades:** Normal (ve solo información pública + su estado) y Corrupto (ve bandas rivales;
-  nunca datos exactos — sigue siendo honesto con el servidor).
+  profecías, susurros y sabotaje). Métricas de aceptación: regiones (Expansivo), fieles (Fanático),
+  profecías emitidas (Maquiavelo).
+- **2 dificultades:** Normal (ve solo información pública + su estado) y Corrupto (ve además las
+  bandas de Divinidad de los rivales, §16; nunca datos exactos — sigue siendo honesto con el
+  servidor). **Corrupto es la dificultad por defecto** de las mesas; el criterio «bot normal gana
+  ≥ 35 % contra bot fácil» de PLAN.md §6 se mide como Corrupto contra Normal.
 - Un bot **debe** poder jugar sin LLM. Cero dependencia de API externa para que la partida no se rompa.
 
 ### 17.2 Dioses dormidos (los "sucesos aleatorios")
-- No envían órdenes. Cada turno hay 15 % de que generen un evento del §14 sobre el mundo.
-- Desde el turno 6, 10 % por turno de **despertar** como dios maligno con agenda scripted
-  (atacar al líder, corromper una civilización, abrir una ruina demoníaca).
+- No envían órdenes, no recaudan, no crecen y no votan: sus fieles quedan como al inicio.
+- **Eventos del §14:** en ventanas de `1d` a `6m` hay un **15 % por turno** de que un dios dormido
+  elegido al azar provoque un evento del §14 sobre un asiento activo elegido al azar; en `1y` y `3y`
+  el compás marca el ritmo: **un evento por compás** (hasta 8), con emisor y diana al azar. El evento
+  es público y nombra al dios dormido que lo provoca.
+- **Despertar:** desde el turno 6, **10 % por turno** de que **un** dios dormido (elegido al azar)
+  despierte como dios maligno. El **13** de la tirada mundial del §14 («Noche de la traición» —una
+  sola tirada por turno—) lo fuerza ese mismo turno; los eventos que provocan los dormidos no
+  despiertan a nadie: su 13 es un «nada pasa».
+- **El dios maligno** no recauda ni crece: su amenaza es la agenda. Cada turno ejecuta **un acto**,
+  elegido al azar entre tres, con efecto inmediato y público:
+
+  | Acto | Efecto |
+  |---|---|
+  | Atacar al líder | La civilización con mayor puntuación de §10 pierde el 5 % de sus fieles y 0,05 de fidelidad |
+  | Corromper | Una civilización al azar pierde 0,08 de fidelidad |
+  | Abrir una ruina demoníaca | Una civilización al azar pierde 0,05 de fidelidad; el maligno suma 10 XP |
+
+- **Qué es y qué no es:** el dios maligno sí puede ser atacado y vasallado (§10), cuenta para la
+  victoria por vasallaje y puntúa al cierre; pero no es civilización: no mueve la barra de época,
+  no sufre el debuff primitivo, no recibe la válvula de §5-B.8 y no compite por hitos globales.
 - Esto es lo que mantiene viva una mesa de 32 asientos con 4 humanos: el mundo sigue actuando.
 
 ### 17.3 Narrador
@@ -943,40 +969,61 @@ Si no se cumple, se ajusta **solo** la tabla de costes/ingresos, no las reglas.
 - **Reparto de ventanas y duración** se miden sobre la mesa de referencia: 8 asientos con **3 humanos**
   (los bots no votan, §5-A.2.3) y una papeleta con mayoría simple.
 
-### 18.1 Resultado de la Fase 0
+### 18.1 Resultado de la Fase 0, re-medido en la Fase 6
 
 Simulación de **500 partidas**, 8 asientos, 3 humanos + 5 bots, `unlockEvery: 5`, horizonte de 30 años.
 Salida en `artifacts/sim-fase0.csv` y resumen en `artifacts/sim-fase0-resumen.json`.
 
-| Métrica | Objetivo | Medido |
+**Re-medida en la Fase 6** (los bots ya eligen problema de era, juegan como Corrupto y llevan
+sabor de personalidad acotado): los costes de `investigar` e `hito cultural` se ajustaron para
+devolver la barra tribal a banda (D67). La medición original de Fase 0 queda entre paréntesis.
+
+| Métrica | Objetivo | Medido Fase 6 (Fase 0) |
 |---|---|---|
-| Divinidad media al año 10 | 5–7 | **5,90** |
-| Runaway | < 15 % | **0,0 %** |
-| Partidas sin vasallaje | 60–80 % | **75,4 %** |
-| Compases por turno | ≥ 3 | **7,24** |
-| Fe sobrante en ventana corta | < 40 % | **31,2 %** |
-| Duración media | 31–43 turnos | **41,9** |
-| Ventana dominante | ≤ 55 % | **34,0 %** |
-| Ventana menos usada | ≥ 5 % | **12,3 %** |
-| Barra tribal al 100 % | turnos 10–16 | **15,8** |
-| Barra de reinos al 100 % | turnos 24–30 | **25,0** |
-| Barra estancada | ≤ 6 turnos | **2** |
-| Debuff: duración media | ≤ 5 turnos | **1,30** |
-| Debuff: peor racha | ≤ 8 turnos | **6** |
-| Debuff cuyo peor eje es cultura o población | ≥ 25 % | **56,6 %** |
-| Barra movida por más de una dimensión | ≥ 60 % | **80,1 %** |
+| Divinidad media al año 10 | 5–7 | **5,88** (5,90) |
+| Runaway | < 15 % | **0,0 %** (0,0 %) |
+| Partidas sin vasallaje | 60–80 % | **80,0 %** (75,4 %) |
+| Compases por turno | ≥ 3 | **7,24** (7,24) |
+| Fe sobrante en ventana corta | < 40 % | **32,7 %** (31,2 %) |
+| Duración media | 31–43 turnos | **41,9** (41,9) |
+| Ventana dominante | ≤ 55 % | **34,0 %** (34,0 %) |
+| Ventana menos usada | ≥ 5 % | **12,3 %** (12,3 %) |
+| Barra tribal al 100 % | turnos 10–16 | **15,1** (15,8) |
+| Barra de reinos al 100 % | turnos 24–30 | **25,4** (25,0) |
+| Barra estancada | ≤ 6 turnos | **1** (2) |
+| Debuff: duración media | ≤ 5 turnos | **1,50** (1,30) |
+| Debuff: peor racha | ≤ 8 turnos | **7** (6) |
+| Debuff cuyo peor eje es cultura o población | ≥ 25 % | **52,0 %** (56,6 %) |
+| Barra movida por más de una dimensión | ≥ 60 % | **87,8 %** (80,1 %) |
 
-Las 15 métricas se cumplen. Las más ajustadas son las **dos bandas de época**: la barra tribal cierra en
-el 15,8 de un máximo de 16 y la de reinos en 25,0 de un mínimo de 24. Si un cambio posterior mueve una
-de ellas fuera de banda, ese cambio hay que justificarlo. Los números que se movieron para llegar aquí:
-costes de investigación (§6 no se tocó), el coeficiente de crecimiento de §4.4, el coste de los hitos
-culturales y la madurez de era de §5-B.2.
+Las 15 métricas siguen en banda con los bots de la Fase 6.
 
-**Hallazgo abierto, fuera de §18:** con la política actual de bots, la personalidad **expansiva** gana
-el 84 % de las partidas simuladas (fanático 13 %, maquiavelo 3 %) y la carta *Minerales* concentra las
-victorias dentro de esa personalidad. No es un criterio de aceptación de esta fase —los pesos de las
-personalidades son invento de implementación, no regla—, pero hay que resolverlo antes de que los
-humanos jueguen contra esos bots: ver `DECISIONES.md` §4.
+### 18.2 Torneo de la Fase 6 (dificultades y personalidades)
+
+`npm run torneo -- 500 20`: 500 partidas de **24 asientos** (3 personalidades × 8 áreas: cada
+personalidad ve cada Área exactamente una vez, para que la carta no sesgue la comparación),
+mitad bots Normales y mitad Corruptos; y 20 mundos de 32 asientos con 2 humanos y 24 dioses
+dormidos. Salida completa en `artifacts/torneo-fase6.json`.
+
+| Criterio (PLAN §6, Fase 6) | Objetivo | Medido |
+|---|---|---|
+| Corrupto («normal» de mesa) contra Normal («fácil», D63) | ≥ 35 % | **60,8 %** |
+| Regiones del Expansivo contra la media de las otras | ≥ +25 % | **+791 %** (8,9×) |
+| Profecías emitidas por el Maquiavelo | ≥ +25 % | **las otras no emiten** |
+| Mundo de 32 asientos con 2 humanos: avanza solo | hasta el final | **20 de 20**, 42,1 turnos |
+| Despertares por partida en el mundo de 32 | — | **4,95** dioses malignos, 100,9 eventos de dormidos, 93,7 actos de agenda |
+
+**Hallazgos abiertos, fuera de §18 (ver `DECISIONES.md` §4):**
+
+1. El **Fanático expresa su carácter** (elige las opciones de problema que suman fieles, milagros
+   de fidelidad) pero no llega a liderar la métrica «fieles»: el ×1,12 instantáneo de `Expansión`
+   compone más población en 40 turnos que la fidelidad que rema por crecimiento. Medido: 0,83×
+   contra la media de las otras. Se re-abordará con el catálogo de 32 áreas de la Fase 5, que trae
+   más acciones con fieles.
+2. En torneos **solo bots** el Expansivo sigue concentrando victorias (91 %). En la mesa de
+   referencia con 3 humanos la partida es mucho más abierta (`runaway` 0 %), pero conviene
+   revisar el reparto cuando entre el contenido de Fase 5: la raíz es la misma acción de
+   `Expansión` (regiones × poder × fieles) y no se ha querido tocar más porque §18 está en banda.
 
 ---
 
@@ -1024,3 +1071,43 @@ Los turnos son turnos jugados; la ventana ficticia de cada uno sigue la escalera
 - Móvil: una sola columna, crónica arriba, acciones en hoja inferior.
 - Accesibilidad: contraste AA, tamaño de texto ajustable, sin animaciones obligatorias,
   toda acción alcanzable por teclado.
+
+## 21. Límites del servicio y retención
+
+El juego vive en planes gratuitos (Supabase Free + hosting de Workers, `PLAN.md` §2) y su perfil de
+uso es personal: pocas partidas al año y mesas de 2–3 humanos. Esta sección fija los dos límites que
+protegen ese presupuesto. No son mecánica jugable: son reglas de servicio, y la interfaz las explica
+cuando se activan.
+
+### 21.1 Mesas activas por jugador
+
+- **Un jugador puede tener como máximo 3 mesas activas a la vez.** «Activa» es toda mesa en fase de
+  vestíbulo, órdenes o resolución donde el jugador mantiene un asiento humano propio. Cuentan igual
+  las mesas que creó y las ajenas a las que se unió.
+- El límite se comprueba al **crear** una mesa y al **sentarse** en una ajena, nunca durante el juego:
+  quien ya está sentado sigue jugando aunque otra mesa suya vuelva al vestíbulo.
+- **Abandonar libera:** el asiento que pasa a bot (§2) deja de contar desde el turno siguiente, igual
+  que la partida que termina.
+- Al superarlo, la creación o el asiento se rechazan con un mensaje claro («Ya guías tres mundos a la
+  vez: cierra o termina uno antes de abrir otro»). No se borra nada ni se pierde partida alguna.
+
+### 21.2 Retención: terminadas y archivadas
+
+- Una partida **terminada** conserva todo (crónica, eventos, estado) para poder releerla y hacer
+  *replay*.
+- A los **30 días** de terminar, una partida pasa a **archivada**: se guarda un **resumen** (modo,
+  asientos, ganador, turno final, fechas de inicio y cierre) con la lista de jugadores, y se borra el
+  detalle pesado (crónica, eventos, órdenes, votos, papeletas, estado por asiento). La mesa sigue
+  apareciendo en el panteón como «Archivada» y su ficha muestra el resumen; el *replay* ya no es
+  posible.
+- El archivo lo dispara la propia creación de una mesa nueva (barre las que correspondan) y se puede
+  forzar a mano (`npm run prune`). Con el volumen previsto (§18) nunca se archivará nada que alguien
+  esté leyendo: 30 días es mucho más que una partida viva.
+
+### 21.3 El servidor duerme
+
+- Supabase Free pausa el proyecto tras 7 días sin actividad. Un ping diario lo mantiene despierto
+  (infraestructura obligatoria, `PLAN.md` §5) y la primera petición tras una pausa puede fallar.
+- Cuando eso ocurre, la interfaz lo dice sin tecnicismos («El servidor está despertando…») y reintenta
+  sola con calma. No es un error del juego ni del jugador: recuperar el proyecto desde el panel de
+  Supabase es el paso de restauración documentado en el README.

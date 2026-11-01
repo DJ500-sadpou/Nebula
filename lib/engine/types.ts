@@ -130,6 +130,15 @@ export interface Buff {
 
 export type SeatKind = 'human' | 'bot' | 'dormant';
 
+/** Banda pública de Divinidad (§16): es lo único que un bot Corrupto ve de un rival. */
+export type DivinityBand = 'baja' | 'media' | 'alta';
+
+export function bandOf(divinity: number): DivinityBand {
+  if (divinity <= 3) return 'baja';
+  if (divinity <= 7) return 'media';
+  return 'alta';
+}
+
 export interface Seat {
   id: number;
   name: string;
@@ -159,6 +168,12 @@ export interface Seat {
   debuffMissionTurn: number | null;
   vassalOf: number | null;
   createdAtTurn: number;
+  /**
+   * §17.2: un dios dormido que despertó como dios maligno. El tipo sigue siendo
+   * `dormant` (no recauda ni crece), pero la mesa lo trata como rival: guerra,
+   * vasallaje, victoria y puntuación. Persiste en `seats.awakened`.
+   */
+  awakened: boolean;
 }
 
 export interface BeatAction {

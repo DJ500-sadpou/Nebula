@@ -23,6 +23,12 @@ export interface ProblemOption {
   cost: number;
   /** Efecto en una línea, para la interfaz. */
   detail: string;
+  /**
+   * Deltas legibles por máquina (§17.1: la política de bots no ejecuta
+   * efectos a ciegas ni interpreta el texto). Debe coincidir con `effect`;
+   * los tests lo comprueban opción a opción.
+   */
+  impact?: Partial<{ believers: number; fidelity: number; fe: number; fame: number; regions: number }>;
   effect: (seat: Seat, state: MatchState) => void;
 }
 
@@ -54,6 +60,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Cavar más hondo',
         cost: 0,
         detail: '+0,03 de fidelidad, −8 fieles por el esfuerzo',
+        impact: { believers: -8, fidelity: 0.03 },
         effect: (seat) => {
           keepFidelity(seat, 0.03);
           addBelievers(seat, -8);
@@ -64,6 +71,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Migrar al norte',
         cost: 20,
         detail: '+15 fieles, −1 región',
+        impact: { believers: 15, regions: -1 },
         effect: (seat) => {
           addBelievers(seat, 15);
           seat.regions = Math.max(1, seat.regions - 1);
@@ -74,6 +82,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Sacrificio de reses',
         cost: 0,
         detail: '−8 fieles, +35 Fe, +3 de fama',
+        impact: { believers: -8, fe: 35, fame: 3 },
         effect: (seat) => {
           addBelievers(seat, -8);
           seat.fe += 35;
@@ -93,6 +102,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Espantar con humo',
         cost: 10,
         detail: '+0,02 de fidelidad',
+        impact: { fidelity: 0.02 },
         effect: (seat) => keepFidelity(seat, 0.02),
       },
       {
@@ -100,6 +110,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Dejarlas pasar',
         cost: 0,
         detail: '−12 fieles, +10 Fe de las reservas',
+        impact: { believers: -12, fe: 10 },
         effect: (seat) => {
           addBelievers(seat, -12);
           seat.fe += 10;
@@ -110,6 +121,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Ritual de hambre',
         cost: 0,
         detail: '−6 fieles, +0,05 de fidelidad',
+        impact: { believers: -6, fidelity: 0.05 },
         effect: (seat) => {
           addBelievers(seat, -6);
           keepFidelity(seat, 0.05);
@@ -128,6 +140,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Convocar un concilio',
         cost: 30,
         detail: '+0,04 de fidelidad',
+        impact: { fidelity: 0.04 },
         effect: (seat) => keepFidelity(seat, 0.04),
       },
       {
@@ -135,6 +148,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Quemar al heresiarca',
         cost: 0,
         detail: '−10 fieles, +0,06 de fidelidad, +2 de fama',
+        impact: { believers: -10, fidelity: 0.06, fame: 2 },
         effect: (seat) => {
           addBelievers(seat, -10);
           keepFidelity(seat, 0.06);
@@ -146,6 +160,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Dejar que se apague',
         cost: 0,
         detail: '−0,04 de fidelidad, +10 Fe',
+        impact: { fidelity: -0.04, fe: 10 },
         effect: (seat) => {
           keepFidelity(seat, -0.04);
           seat.fe += 10;
@@ -164,6 +179,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Cerrar las puertas',
         cost: 25,
         detail: '−5 fieles, +0,03 de fidelidad',
+        impact: { believers: -5, fidelity: 0.03 },
         effect: (seat) => {
           addBelievers(seat, -5);
           keepFidelity(seat, 0.03);
@@ -174,6 +190,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Rezar y esperar',
         cost: 0,
         detail: '−15 fieles, +0,05 de fidelidad',
+        impact: { believers: -15, fidelity: 0.05 },
         effect: (seat) => {
           addBelievers(seat, -15);
           keepFidelity(seat, 0.05);
@@ -184,6 +201,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Acoger a los enfermos',
         cost: 0,
         detail: '−10 fieles, +0,08 de fidelidad, +3 de fama',
+        impact: { believers: -10, fidelity: 0.08, fame: 3 },
         effect: (seat) => {
           addBelievers(seat, -10);
           keepFidelity(seat, 0.08);
@@ -203,6 +221,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Negociar en la sombra',
         cost: 40,
         detail: '+10 fieles, +0,04 de fidelidad',
+        impact: { believers: 10, fidelity: 0.04 },
         effect: (seat) => {
           addBelievers(seat, 10);
           keepFidelity(seat, 0.04);
@@ -213,6 +232,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Romper la huelga',
         cost: 0,
         detail: '−20 fieles, +30 Fe, +2 de fama',
+        impact: { believers: -20, fe: 30, fame: 2 },
         effect: (seat) => {
           addBelievers(seat, -20);
           seat.fe += 30;
@@ -224,6 +244,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Reformar las leyes',
         cost: 60,
         detail: '+5 fieles, +0,06 de fidelidad',
+        impact: { believers: 5, fidelity: 0.06 },
         effect: (seat) => {
           addBelievers(seat, 5);
           keepFidelity(seat, 0.06);
@@ -242,6 +263,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Obras públicas',
         cost: 50,
         detail: '+12 fieles, +0,02 de fidelidad',
+        impact: { believers: 12, fidelity: 0.02 },
         effect: (seat) => {
           addBelievers(seat, 12);
           keepFidelity(seat, 0.02);
@@ -252,6 +274,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Austeridad del culto',
         cost: 0,
         detail: '−10 fieles, +25 Fe',
+        impact: { believers: -10, fe: 25 },
         effect: (seat) => {
           addBelievers(seat, -10);
           seat.fe += 25;
@@ -262,6 +285,7 @@ export const PROBLEMS: EraProblem[] = [
         label: 'Procesión multitudinaria',
         cost: 10,
         detail: '+0,05 de fidelidad',
+        impact: { fidelity: 0.05 },
         effect: (seat) => keepFidelity(seat, 0.05),
       },
     ],

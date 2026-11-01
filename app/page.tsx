@@ -1,9 +1,11 @@
 import Link from 'next/link';
 import { CreateMatch } from '@/components/CreateMatch';
 import { SetupNotice } from '@/components/SetupNotice';
+import { WakingNotice } from '@/components/WakingNotice';
 import { signOut } from './actions';
 import { currentSession } from '@/lib/db/auth';
 import { missingPublicSupabaseEnv, readPublicSupabaseEnv } from '@/lib/db/env';
+import { isWakingError, withRetry } from '@/lib/server/retry';
 
 // La sesión se lee de cookies: la página nunca puede ser estática.
 export const dynamic = 'force-dynamic';
@@ -44,12 +46,21 @@ export default async function HomePage() {
   const session = await currentSession();
   if (!session) return <SignedOutHome />;
 
-  const { data, error } = await session.supabase
-    .from('seats')
-    .select('seat_idx, name, matches(code, status, turn, era)')
-    .eq('user_id', session.userId);
-
-  const seats = (data ?? []) as unknown as LobbySeat[];
+  // La lista se reintenta con calma si el proyecto está despertando (§21.3).
+  let seats: LobbySeat[] = [];
+  let seatsError: unknown = null;
+  try {
+    const { data, error } = await withRetry(async () =>
+      session.supabase
+        .from('seats')
+        .select('seat_idx, name, matches(code, status, turn, era)')
+        .eq('user_id', session.userId),
+    );
+    seatsError = error;
+    seats = (data ?? []) as unknown as LobbySeat[];
+  } catch (caught) {
+    seatsError = caught;
+  }
 
   return (
     <section className="space-y-8">
@@ -84,23 +95,27 @@ export default async function HomePage() {
             <h3 className="font-display text-xl text-parchment">Tus mesas</h3>
             <span className="text-xs text-parchment-dim">{seats.length} en total</span>
           </div>
-          <CreateMatch />
+          <div className="flex flex-wrap items-center gap-3">
+            <CreateMatch />
+            <CreateMatch multi label="Crear sala con amigos" />
+          </div>
         </div>
 
-        {error && (
-          <p className="rounded border border-blood/40 bg-ink-soft px-4 py-3 text-sm text-blood">
-            No se pudieron leer tus mesas ({error.code ?? 'error de red'}). Revisa que las
-            migraciones estén aplicadas.
-          </p>
-        )}
-
-        {!error && seats.length === 0 && (
+        {seatsError ? (
+          isWakingError(seatsError) ? (
+            <WakingNotice />
+          ) : (
+            <p className="rounded border border-blood/40 bg-ink-soft px-4 py-3 text-sm text-blood">
+              No se pudieron leer tus mesas. Revisa que las migraciones estén aplicadas.
+            </p>
+          )
+        ) : seats.length === 0 && (
           <div className="rounded-lg border border-dashed border-gold/25 px-6 py-10 text-center">
             <p className="font-display text-lg text-parchment">Todavía no guías a nadie</p>
             <p className="mx-auto mt-2 max-w-prose text-sm text-parchment-dim">
               «La peor carta» es la iniciación: tú contra tres bots, doce turnos y la peor Área
-              Pequeña como carta. Las partidas con amigos y los códigos de invitación llegan en la
-              Fase 4.
+              Pequeña como carta. O crea una sala con amigos y códigos de invitación: los
+              asientos libres se rellenan con bots y la mesa vota la ventana de cada turno.
             </p>
           </div>
         )}

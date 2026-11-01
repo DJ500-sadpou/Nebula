@@ -11,11 +11,13 @@ por turnos, con interfaz de texto y opciones, sin sprites. Los asientos que no o
 cubren bots o "dioses dormidos" que generan eventos, de modo que una mesa de 4 personas se siente
 como una de 32.
 
-**Stack.** Next.js en **Vercel Hobby** + **Supabase Free** (Postgres, Auth, Realtime). Neon y Firebase
+**Stack.** Next.js en **Freebuff Sites** (Cloudflare Workers vía OpenNext) + **Supabase Free**
+(Postgres, Auth, Realtime). Neon y Firebase
 quedan como apoyo opcional, no en el camino crítico (§2.3).
 
 **Veredicto de tarjeta.** Ninguno de los cuatro exige método de pago para su plan gratuito. Hay tres
-condiciones que sí importan: Vercel Hobby prohíbe uso comercial, Supabase pausa proyectos con 7 días
+condiciones que sí importan: Freebuff Sites limita requests y CPU (100 k/mes, 500 s/día), Supabase
+pausa proyectos con 7 días
 de poca actividad, y Firebase Spark no puede ejecutar código de servidor (por eso no es el backend).
 
 **Esfuerzo.** 9 fases, ~27–36 días de trabajo efectivo. La primera versión jugable de una sola persona
@@ -24,8 +26,8 @@ contra bots llega al final de la Fase 3 (~8–12 días). El sistema de ventanas 
 
 **Perfil de uso (dato del autor).** Proyecto **personal y no comercial**: menos de 150 partidas en toda
 la vida del juego, **máximo 10 jugadores**, una convocatoria cada ~3 meses y mesas habituales de 2–3
-personas. Esto no cambia la arquitectura, pero sí tres cosas: el plan Hobby de Vercel encaja sin
-letra pequeña, la cuota gratuita deja de ser un riesgo y **el único problema operativo real pasa a ser
+personas. Esto no cambia la arquitectura, pero sí tres cosas: el plan gratuito de Freebuff Sites
+encaja en ese perfil de uso (§2.2 fija la disciplina de requests), la cuota gratuita deja de ser un riesgo y **el único problema operativo real pasa a ser
 la pausa por inactividad de Supabase** (ver §5). También fija la mesa por defecto en **8 asientos
 (2–3 humanos + 5–6 IA)**: 32 sigue siendo el techo fiel a la novela, no la mesa normal.
 
@@ -77,25 +79,29 @@ tres siglos: de treinta hombres lagarto desterrados a un imperio multi-especie c
 
 | Servicio | ¿Tarjeta? | Límites del plan gratuito | ¿Sirve de backend? |
 |---|---|---|---|
-| **Vercel Hobby** | No para Hobby (solo al pasar a Pro) | 100 GB de transferencia/mes, 10 GB de origen, funciones de hasta **300 s**, WebSockets disponibles con Fluid compute, cron **1/día** (±59 min). **Uso comercial prohibido** | Sí: frontend + API routes |
-| **Supabase Free** | No (solo en planes de pago) | 500 MB de base de datos, 5 GB de egress, **200 conexiones Realtime** y **2 M mensajes/mes**, 500 k invocaciones de Edge Functions, 50 k MAU. **Se pausa con 7 días de poca actividad** | Sí: Postgres + Auth + Realtime |
+| **Freebuff Sites** (Cloudflare Workers vía OpenNext) | No | **10.000 requests/día y 100.000/mes**, CPU **500 s/día y 5.000 s/mes**, 1 GB R2, dominio `*.freebuff.page` + propios, bindings R2/Realtime. El build de Next.js App Router lo maneja la plataforma; el proyecto no declara el adaptador en el repo | Sí: frontend + API routes en el Worker |
+| **Vercel Hobby** (reemplazado por Freebuff Sites) | No para Hobby | 100 GB de transferencia/mes, funciones de hasta **300 s**, cron **1/día**. **Uso comercial prohibido** | Sí, pero ya no es el hosting elegido |
+| **Supabase Free** | No (solo en planes de pago) | 500 MB de base de datos, 5 GB de egress, **200 conexiones Realtime** y **2 M mensajes/mes**, 500 k invocaciones de Edge Functions, 50 k MAU. **Se pausa con 7 días de poca actividad** | Sí: Postgres + Auth + Realtime. **Permanece intacto** |
 | **Neon Free** | **No, explícito** | 1 GB por proyecto, 100 CU-horas/mes, autosuspensión a los **5 min**, 10 ramas, 100 proyectos | Sí como Postgres, pero **sin Realtime** y con arranque en frío |
 | **Firebase Spark** | **No, explícito** | Firestore 50 k lecturas / 20 k escrituras al día, 1 GiB; RTDB 100 conexiones, 1 GB, 10 GB/mes; Hosting 10 GB. **Sin Cloud Functions ni Cloud Run sin Blaze** | **No**: no puede ejecutar lógica de servidor |
 
 Fuentes: [Supabase pricing](https://supabase.com/pricing), [pausing](https://supabase.com/docs/guides/platform/free-project-pausing),
 [Neon plans](https://neon.com/docs/introduction/plans), [Vercel Hobby](https://vercel.com/docs/plans/hobby),
-[Vercel functions](https://vercel.com/docs/functions/limitations), [Vercel WebSockets](https://vercel.com/docs/functions/websockets),
 [Firebase pricing plans](https://firebase.google.com/docs/projects/billing/firebase-pricing-plans),
 [Firestore quotas](https://firebase.google.com/docs/firestore/quotas).
+Límites de Freebuff Sites: panel del sitio Nebula (inspección del 26-10-2026).
 
 ### 2.2 Las tres letras pequeñas que sí afectan al proyecto
 
-1. **Vercel Hobby no es comercial.** *No aplica en tu caso:* Hobby está pensado exactamente para
-   proyectos personales sin ánimo de lucro. Solo hay que evitar donaciones, anuncios o cobro de
-   entradas; si algún día aparecen, se mueve el hosting sin reescribir el motor.
-2. **Supabase pausa a los 7 días sin actividad.** Un cron diario de Vercel (`/api/health`) que hace
-   una consulta trivial lo mantiene despierto. Está dentro del límite de 1 cron/día. Aun así, la
-   primera petición tras una pausa falla: la UI debe reintentar y mostrar "despertando servidor".
+1. **Freebuff Sites tiene presupuesto de requests.** 10.000/día y 100.000/mes: sobran para jugar por
+   turnos, pero **no para *polling* agresivo**. La sincronización de mesa va primero por **Supabase
+   Realtime** (WebSocket directo, no cuenta como request del Worker) y el *fallback* de *polling*
+   es lento (≥ 30 s) o manual. La resolución de un turno es determinista y de milisegundos de CPU:
+   el límite de 500 s/día da para decenas de miles de turnos.
+2. **Supabase pausa a los 7 días sin actividad.** Un ping diario al `/api/health` programado desde el
+   propio sitio (o un servicio externo si la plataforma no ofrece planificador) lo mantiene
+   despierto; el mecanismo concreto se fija en **P-08** al desplegar. Aun así, la primera petición
+   tras una pausa falla: la UI debe reintentar y mostrar "despertando servidor".
 3. **El SMTP integrado de Supabase tiene un límite muy bajo de correos por hora.** Con login por
    *magic link* la partida falla el día del lanzamiento. Mitigación: **email + contraseña con
    confirmación desactivada**, más *login anónimo* para entrar a jugar en 5 segundos, más Google
@@ -107,7 +113,7 @@ Fuentes: [Supabase pricing](https://supabase.com/pricing), [pausing](https://sup
 Navegador
    │  HTTPS + WebSocket (Supabase Realtime)
    ▼
-Vercel Hobby ── Next.js App Router
+Freebuff Sites (Cloudflare Workers vía OpenNext) ── Next.js App Router
    │            · UI (texto, opciones, crónica)
    │            · API routes = único punto de mutación
    │            · motor de reglas compartido con los bots
@@ -142,7 +148,7 @@ anotado en [`PENDIENTES.md`](PENDIENTES.md) con un ID.
 | Migraciones SQL, políticas RLS y auditoría estática | Aplicar las migraciones contra la base real (**P-02**) |
 | UI de texto, rutas de API, build y servidor de desarrollo | Test de dos cuentas con usuarios reales (**P-03**) |
 | Arranque sin configuración (modo revisión) | Ajustes de Auth y prueba manual en navegador (**P-04**, **P-05**) |
-| | Despliegue en Vercel y cron anti-pausa (**P-06**, **P-08**) |
+| | Despliegue en Freebuff Sites y ping anti-pausa (**P-06**, **P-08**) |
 | | Tipos generados de la base (**P-07**) |
 
 Tres reglas que se derivan de esto:
@@ -177,7 +183,7 @@ desde su semilla.
 
 ```
 Jugador A ─┐
-Jugador B ─┤  POST /api/match/:id/order   (orden privada, RLS)
+Jugador B ─┤  POST /api/match/[code]/orders   (orden privada, RLS)
 Jugador C ─┘            │
                         ▼
               matches.turn_phase = 'resolving'   ← claim atómico
@@ -205,7 +211,7 @@ Jugador C ─┘            │
 | Todo en Firebase (Firestore + rules) | Sin Functions, la lógica de resolución vive en el cliente: trampas triviales y RNG manipulable |
 | Todo en Vercel | No hay base de datos ni realtime gratis incluidos; habría que añadir un tercero igualmente |
 | Todo en Neon | Sin Auth ni Realtime; habría que construir ambos y el arranque en frío castiga cada turno |
-| Supabase Edge Functions | Válido (500 k invocaciones), pero duplica el runtime y complica compartir el motor con los tests. Se deja como plan B si Vercel Hobby se queda corto |
+| Supabase Edge Functions | Válido (500 k invocaciones), pero duplica el runtime y complica compartir el motor con los tests. Se deja como plan B si los límites de Freebuff Sites se quedan cortos |
 
 ---
 
@@ -312,6 +318,10 @@ Realtime → debe devolver 0 filas. Se repite en cada fase.
   de los 500 MB para siempre. Se deja implementada (partidas `closed` de más de 30 días → solo
   resumen) únicamente por si algún día se abre al público.
 - Una partida de 10 asientos × ~37 turnos ≈ **1,4 MB**; de 32 asientos ≈ 4 MB.
+- **Implementada en la Fase 7A** (migración `20261026100500_limits_retention.sql`): `closed_at` se
+  fija al terminar, `prune_finished_matches(30)` guarda el `summary` y libera el detalle, y el
+  disparo vive en la propia creación de mesas — sin cron. Detalle y regla en `REGLAS.md` §21.2 y
+  `DECISIONES.md` D69.
 
 ---
 
@@ -338,7 +348,7 @@ cada tres meses, Supabase lo pausaría a los 7 días y la primera visita fallar�
 deja de ser un detalle y pasa a ser **infraestructura obligatoria**:
 
 ```
-Vercel cron (1/día, límite Hobby)  →  GET /api/health  →  select 1 from matches limit 1
+Ping anti-pausa diario (P-08)  →  GET /api/health  →  select 1 from matches limit 1
 ```
 
 Si el cron se cae, el juego no arranca hasta restaurar el proyecto a mano desde el panel de Supabase.
@@ -456,14 +466,41 @@ recargar en mitad de un turno y comprobar que dos clics simultáneos resuelven u
   de datos a mano, y recargar la página en cualquier fase no rompe el estado.
 - **Riesgo:** que el texto sea aburrido. Mitigación: 45 plantillas ya en esta fase, no al final.
 
-### Fase 4 — Multijugador · 4–5 días
-- Salas con código de 6 caracteres, hasta 32 asientos, relleno automático con bots al iniciar.
-- Temporizadores, órdenes secretas, claim atómico, idempotencia, Realtime + *fallback* a polling.
-- Reconexión, abandono → bot, expulsión del lobby, listo/no listo.
-- **Votación de ventana:** proponer, papeleta con cierre, solo humanos, mayoría, empate = mantener,
-  resultado aplicado al turno siguiente y publicado con la crónica.
-- **Ventanas forzadas:** un choque de civilizaciones impone `1d` durante 2 turnos sin votación; una
-  guerra recorta el techo (`7d` tribal, `30d` reinos, `3m` modernidad) y lo libera al firmar la paz.
+### Fase 4 — Multijugador · 4–5 días · 4A ✅ / 4B ⏳
+
+**4A — en la nube (✅ completada).** Lo que no necesita cuentas ni credenciales:
+
+- **Papeleta real de ventana** (§5-A.2): `lib/engine/ballot.ts` cuenta votos reales — solo humanos,
+  mayoría simple, empate/sin votos = mantener, papeleta de tres opciones (actual, propuesta y una
+  más corta), resultado aplicado al turno siguiente y publicado con la crónica (evento `ballot`).
+  `resolveTurn` recibe la papeleta como tercer parámetro opcional: sin papeleta decide la mesa
+  simulada de siempre y **ningún golden cambia** (verificado: 155 tests previos siguen verdes).
+- **Salas de lobby** (§2, §5): `create_lobby`/`join_lobby`/`set_ready`/`kick_seat`/`leave_seat` en
+  la migración `20261026100300_multiplayer.sql`; el anfitrión (asiento 0) arranca y los asientos
+  libres se rellenan con bots. Abandono → bot al turno siguiente, sin borrar los fieles ni las
+  órdenes ya enviadas (§2).
+- **Órdenes por asiento, secretas e inmutables**: tabla `orders` (ya existía en el esquema) con
+  `submit_orders` idempotente y guard de asiento humano; RLS ya dictada en la Fase 1 (solo el
+  dueño lee las suyas).
+- **Cierre del turno que espera a todos** (§5): `resolveMultiMatchTurn` resuelve cuando todos los
+  humanos enviaron o cuando vence `turn_ends_at` (120/60/240 s; 0 = asíncrono de 12 h). Quien no
+  envía juega «no intervenir»: un ausente nunca bloquea. Claim atómico + `apply_turn` idempotente.
+- **Ventanas forzadas** (§5-A.11): ya estaban en el motor desde la Fase 0; ahora la papeleta se
+  supedita (choque = sin votación; guerra recorta las opciones) y `castMultiVote` lo valida antes.
+- **API**: `POST /api/match` con `mode: "multi"`, rutas `lobby`, `orders`, `vote` y `state`
+  (respaldo de *polling*); la ruta `turn` despacha por modo.
+- **UI**: `LobbyScreen` (asientos, listo, expulsar, arrancar), `BallotPanel` (proponer/votar),
+  `TurnScreen` consciente de la mesa (quién envió, reloj del turno), `AutoRefresh` de respaldo
+  (≥ 30 s, presupuesto de requests del hosting, D55) y `/preview/lobby` (D54).
+- **Verificación:** 199 tests (44 nuevos: papeleta, orquestación, flujo SQL completo del lobby en
+  Postgres 17 en memoria —crear → unirse → listo → arrancar → órdenes → papeleta → resolver →
+  replay→, y RLS en vivo por rol), `typecheck` limpio, `build` y servidor en modo revisión con
+  `/preview/lobby` en 200.
+
+**4B — en tu equipo (⏳).** **P-13:** la partida real de 4 pestañas con 4 cuentas (aceptación de la
+fase, abajo) y **P-14:** la capa Supabase Realtime sobre la mesa (suscripción a `seats`/`orders` en
+el cliente); el *polling* de respaldo ya funciona solo.
+
 - **Aceptación:** 4 pestañas con 4 cuentas juegan 6 turnos; ninguna ve la Fe ajena; pulsar "listo"
   simultáneamente resuelve **una sola vez**; una propuesta de `7d` se aprueba por 2 de 3 humanos y
   entra en el turno siguiente; si empata, se mantiene `1d`; declarada una guerra tribal, la papeleta
@@ -486,19 +523,100 @@ recargar en mitad de un turno y comprobar que dos clics simultáneos resuelven u
 - **Riesgo:** inflación de contenido desbalanceado. Mitigación: la simulación de Fase 0 se re-ejecuta
   con el catálogo completo.
 
-### Fase 6 — IA y sustitución · 3–4 días
-- Bots de utilidad con 3 personalidades y 2 dificultades; dioses dormidos; despertar maligno;
-  sustitución automática de humanos que abandonan.
-- **Aceptación:** bot normal gana ≥ 35 % contra bot fácil; una partida de 32 asientos con 2 humanos
-  avanza sola hasta el final sin intervención.
-- **Riesgo:** bots que juegan todos igual. Mitigación: métricas por personalidad (territorio vs fieles
-  vs profecías) deben diferir en ≥ 25 %.
+### Fase 6 — IA y sustitución · 3–4 días · ✅ cerrada en la nube
 
-### Fase 7 — Despliegue y límites gratuitos · 2 días
+**Verificación (26-10-2026, todo por simulación y tests, sin credenciales):**
+
+- **Bots de utilidad con 3 personalidades y 2 dificultades** (§17.1): personalidades con sabor propio
+  acotado por turno (D65) y dificultades Normal/Corrupto donde el Corrupto solo añade las bandas
+  de Divinidad de los rivales (§16) — test de honestidad: cambiar datos exactos dentro de la misma
+  banda no altera su plan.
+- **Dioses dormidos y despertar maligno** (§17.2): eventos del §14 provocados por dormidos (15 %
+  por turno; uno por compás en `1y`/`3y`), despertar al 10 % desde el turno 6, «Noche de la
+  traición» (13 del §14) forzándolo, agenda de 3 actos contra las civilizaciones, y el maligno como
+  rival de §10: guerra, vasallaje, victoria y puntuación (§4.5 de DECISIONES, resuelta).
+- **Los bots eligen problema de era** (cierra D51): etiquetas `impact` legibles por máquina en las
+  18 opciones, ponderadas por personalidad.
+- **Sustitución automática de humanos que abandonan**: desde la Fase 4 (D58) — abandono → bot al
+  turno siguiente, órdenes en curso respetadas; re-verificada en PGlite.
+- **Aceptación medida** (`npm run torneo -- 500 20`, §18.2 de REGLAS): Corrupto gana el **60,8 %**
+  contra Normal (≥ 35 % ✓); el Expansivo lidera regiones con **8,9×** sobre la media (≥ 1,25 ✓);
+  el Maquiavelo es el único que emite profecías ✓; **20 de 20** mundos de 32 asientos con 2 humanos
+  llegan solos al final (42,1 turnos de media, 4,95 despertares por partida) ✓; §18 re-medido
+  completo con los bots nuevos y **las 15 métricas en banda** (reinos 15,1).
+- **Huecos honestos** (REGLAS §18.2, DECISIONES §4.6): el Fanático no llega a liderar la métrica
+  «fieles» (0,83×) y en torneos solo de bots el Expansivo concentra victorias; ambos quedan
+  anotados para el catálogo de Fase 5, que trae más acciones con fieles.
+- **Pruebas:** 228/228 tests (29 nuevos: dormidos, agenda, despertar, honestidad del Corrupto,
+  relleno de mesas grandes en PGlite, mundo de 32), `typecheck` limpio, `build` OK.
+
+### Fase 7 — Despliegue y límites gratuitos · 2 días · 7A ✅ / 7B ⏳
 - Cron anti-pausa, política de retención, límite de partidas simultáneas, logs y alerta por email.
 - Página de estado honesta ("servidor despertando") y reintentos con backoff.
 - **Aceptación:** 7 días sin tráfico + cron ⇒ el proyecto Supabase sigue activo; partida de 32 asientos
   completada en producción; primera petición tras pausa se recupera sola.
+
+**7A — construido y verificado en la nube (26-10-2026):**
+
+- **Reglas antes que el código (invariante 8):** `REGLAS.md` §21 nueva — límites del servicio
+  (§21.1 máximo 3 mesas activas por jugador; §21.2 retención de terminadas >30 días → solo
+  resumen; §21.3 el servidor duerme) y `DECISIONES.md` D68–D71.
+- **Límite de mesas simultáneas:** guard en SQL (`active_seat_count` + `too_many_active` en
+  `create_solo_match`/`create_lobby`, `-4` en `join_lobby`), mensaje claro en la UI y mapeo a
+  409. Verificado en Postgres 17 (PGlite): 4ª mesa rechazada, sentarse con 3 activas rechazado,
+  abandonar/terminar liberan.
+- **Retención (§4.2):** migración 6 con `summary`/`pruned_at`, `apply_turn` fijando `closed_at`,
+  `prune_finished_matches(30)` con disparo en la creación y llave manual (`npm run prune`).
+  Verificado en PGlite: archiva la vieja (resumen completo, detalle borrado, mesa y jugadores
+  intactos), respeta la reciente y la activa, idempotente, y la creación dispara el barrido.
+  La ficha de partida archivada muestra el resumen en la UI.
+- **"Servidor despertando" + backoff (§2.2.2, §5):** `lib/server/retry.ts` reintenta lecturas y
+  mutaciones idempotentes (250/500 ms; la creación nunca, D70), `/api/health` reintenta y clasifica
+  `waking`, los fallos clasificados responden 503 con `waking:true`, y la portada/pantalla de mesa
+  muestran la página honesta con auto-reintento a 15 s autoextinguible y botón manual. Verificado
+  con tests unitarios de clasificación y backoff.
+- **Logs (D71):** `lib/server/log.ts` — eventos de negocio y fallos como una línea JSON por
+  consola, compatible con Workers, sin secretos.
+- **Pruebas:** 248/248 tests (20 nuevos: límites y retención en PGlite, retry/backoff, resumen
+  archivado), `typecheck` limpio, `build` OK, arranque en modo revisión intacto.
+
+**7B — queda en tu equipo:** cron anti-pausa programado (**P-08**), alerta por email (**P-10**:
+  fuera del camino crítico) y la aceptación de producción (**P-15**: 7 días sin tráfico + cron ⇒
+  proyecto activo; primera petición tras pausa se recupera sola; partida de 32 en producción).
+
+### Auditoría profunda · 26-10-2026 · ✅
+
+Con todas las fases construibles en la nube cerradas, se auditó el proyecto completo (motor, API,
+SQL/RLS, multijugador, UI/servidor y documentación) antes de esperar el P-12 del usuario. El estado
+previo estaba en verde (typecheck, 248/248 tests, build, arranque en modo revisión); la auditoría
+encontró tres defectos reales de concurrencia y varios desfases documentales:
+
+- **C1 — Votos de papeleta perdibles:** `tryResolveTurn` cerraba la papeleta (`close_ballot`)
+  ANTES de aplicar el turno (`apply_turn`). Si `apply_turn` fallaba, el reintento ya no encontraba
+  la propuesta (`status='open'`) y la ventana votada se descartaba en silencio. Corregido: aplicar
+  primero (idempotente) y cerrar después con reintento; un fallo del cierre queda solo como una
+  propuesta «open» cosmética de un turno ya pasado, registrada en el log (`ballot_close_failed`).
+- **C2 — Papeleta duplicada bajo carrera:** `open_ballot` era select-then-insert: dos propuestas
+  casi simultáneas dejaban dos filas «open» y el `maybeSingle()` de la vista de estado devolvía
+  PGRST116 (un 500 que duraba todo el turno). Corregido con índice único parcial
+  `turn_proposals (match_id, turn) WHERE status='open'` (migración 7) y `open_ballot` devolviendo
+  la existente si pierde la carrera (A.2.2).
+- **C3 — Rezagado del lobby atrapado:** quien se sentaba entre la lectura del anfitrión y
+  `begin_orders` quedaba proyectado como bot CON su `user_id` colgado (la proyección no lo toca):
+  no podía enviar órdenes (`bot_seat`), ni re-entrar (índice único), ni ser limpiado por
+  `leave_seat` (exige `kind='human'`). Corregido: `begin_orders` desengancha (`user_id=null`) los
+  asientos no humanos tras proyectar (§2: el que llega tarde, fuera).
+- **M1 — Guard §21.1 no atómico:** `active_seat_count >= 3` era check-then-act; dos operaciones
+  simultáneas del mismo jugador podían superar el máximo. Corregido con candado consultivo por
+  jugador (`pg_advisory_xact_lock`) en `create_solo_match`, `create_lobby` y `join_lobby`.
+- **Documentación:** README (estado con 7A/7B), PLAN §3.2 (`:id/order` → `[code]/orders`) y §11
+  (recuento real de tests), PENDIENTES (P-02/P-13 a **siete** migraciones; residuos de Vercel en
+  P-04/P-10 → Freebuff Sites), DECISIONES (D19 anotada como sustituida por D55; nueva D72).
+- **Verificación:** 250/250 tests (2 nuevos en PGlite: papeleta única por turno bajo doble
+  propuesta, y desenganche del rezagado), `typecheck` limpio, `build` OK, arranque en modo
+  revisión intacto. Notas aceptadas por diseño: `claim_turn` se autodevence a los 2 min, el lobby
+  se ve con el código (capability de 32⁶ combinaciones) y las tablas `whispers`/`wars`/`pacts`/
+  `missions` quedan reservadas a fases futuras.
 
 ### Fase 8 — Modos, pulido y lanzamiento · 4–5 días
 - "Profecía Contradictoria" (duelo), "El falso dios" (deducción), "La Caída" (historia).
@@ -517,25 +635,32 @@ recargar en mitad de un turno y comprobar que dos clics simultáneos resuelven u
 │  ├─ layout.tsx  globals.css    cabecera, pie y paleta
 │  ├─ page.tsx                   portada / estado / lista de mesas (RLS)
 │  ├─ login/                     acceso email, registro y sesión anónima
+│  ├─ preview/                   vistas de revisión sin base (turno y lobby)
 │  ├─ api/health/route.ts        anti-pausa (cron)
-│  └─ match/[code]/page.tsx      mesa de juego            ← Fase 3
-├─ components/                   piezas de UI compartidas (aviso de configuración)
+│  ├─ api/match/                 crear mesa (solo/multi)
+│  └─ api/match/[code]/          turn, orders, vote, state y lobby
+├─ components/                   piezas de UI compartidas (planificador, papeleta, lobby, avisos)
 ├─ proxy.ts                      refresco de sesión (Next 16 sustituye middleware.ts)
 ├─ lib/
-│  ├─ engine/                    puro, sin IO
-│  │  ├─ types.ts  rng.ts  economy.ts  ic.ts  digest.ts
-│  │  ├─ content.ts  resolve.ts  index.ts
-│  │  └─ (victory.ts, narrator/ y bots de Fase 6 cuando toquen)
+│  ├─ engine/                    puro, sin IO (types, rng, economy, ic, digest, content,
+│  │                             resolve, ballot, problems, dormants)
 │  ├─ bots/                      política determinista de las 3 personalidades
-│  └─ db/                        env.ts, server.ts, auth.ts, admin.ts (Fase 3)
+│  ├─ narrator/                  crónica por plantillas
+│  ├─ match/                     orquestación: solo.ts y lobby.ts (multijugador)
+│  ├─ server/                    utilidades de servidor sin datos (origin, retry, random, log)
+│  └─ db/                        env, clientes Supabase, mapeos y repositorio (matches, multiplayer)
 ├─ supabase/
 │  ├─ config.toml                auth anónimo, confirmación desactivada
-│  └─ migrations/                esquema + RLS + trigger de perfiles
+│  └─ migrations/                7 migraciones incrementales (esquema → RLS → turnos →
+│                                multijugador → malignos → límites/retención → carreras)
 ├─ tests/
 │  ├─ engine/                    unitarios + golden de partidas completas
-│  ├─ db/                        entorno, auditoría de RLS y Postgres 17 en memoria
+│  ├─ db/                        entorno, RLS, mapeo y flujos (turno, lobby, límites) en PGlite
+│  ├─ match/                     orquestación pura (lobby, archivadas)
+│  ├─ narrator/                  plantillas y crónica
+│  ├─ server/                    retry/backoff del despertar
 │  └─ rls/two-accounts.ts        test real de dos cuentas (P-03)
-├─ tools/simulate.ts             simulación de Fase 0
+├─ tools/                        simulate (Fase 0), tournament (Fase 6) y prune (retención)
 ├─ artifacts/                    resultados de la simulación
 ├─ REGLAS.md  PLAN.md  DECISIONES.md  PENDIENTES.md  README.md  AGENTS.md
 ```
@@ -548,7 +673,7 @@ recargar en mitad de un turno y comprobar que dos clics simultáneos resuelven u
 |---|---|---|
 | La mesa real será de 2–3 humanos, no de 32 | Alto (diseño equivocado) | Mesa por defecto de **8 asientos** (2–3 humanos + 5–6 IA); 32 queda como modo "mundo completo". Los bots y dioses dormidos son el contenido, no un relleno |
 | Supabase pausa el proyecto entre partidas | **Alto** (uso esporádico) | Cron diario obligatorio + reintento con "despertando servidor" + paso de restauración manual documentado |
-| Vercel Hobby es no comercial | Ninguno | Uso personal sin ánimo de lucro: es el caso de uso previsto del plan |
+| Presupuesto de requests del hosting | **Medio** (10 k/día, 100 k/mes) | Realtime primero (WebSocket, no gasta requests), polling de respaldo lento (≥ 30 s) o manual, un turno por request y nada de latidos por segundo |
 | Fuga de información por RLS | **Crítico** (rompe el juego) | `seat_state` solo `service_role` + test de dos cuentas en CI |
 | LLM gratuito con 20 req/día | Alto si se depende de él | Narración por plantillas por defecto; LLM opcional y con fallback |
 | 500 MB de base de datos | Medio | Retención a 30 días + resumen de partidas cerradas |
@@ -578,7 +703,8 @@ novela más allá del texto de ambientación.
    todas las mecánicas en ~30 minutos y deja la Fase 3 como algo demostrable.
 2. **Narración:** plantillas deterministas por defecto, LLM opcional y apagado con *fallback* (D20). Una
    caída del proveedor no puede romper un turno.
-3. **Hosting:** Vercel Hobby, uso personal no comercial, + Supabase Free (D19).
+3. **Hosting:** Freebuff Sites (Cloudflare Workers vía OpenNext, D55), uso personal no comercial, +
+   Supabase Free (D19).
 
 Estas decisiones ya están reflejadas en las fases; no bloquean nada.
 
@@ -594,7 +720,7 @@ npm ci                       # respeta el lockfile; no actualiza dependencias
 cp .env.example .env.local   # P-01: rellena URL y claves (nunca al repositorio)
 npm run dev                  # http://localhost:3000, bind a 0.0.0.0
 npm run typecheck            # tsc --noEmit
-npm test                     # 133 tests: motor + esquema/RLS/entorno
+npm test                     # 250 tests: motor, papeleta, lobby, límites/retención, retry y carreras
 npm run build                # build de producción
 npm run test:rls             # P-03: proyecto real; sin claves sale con código 2
 npm run sim -- 500 8 5       # simulación de Fase 0 → artifacts/

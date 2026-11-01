@@ -5,7 +5,6 @@ import {
   MISSION_TURNS,
   addBuff,
   nextTechId,
-  applyWorldEvent,
   awardMilestone,
   expireBuffs,
   hasBuff,
@@ -21,8 +20,17 @@ import {
   activeSeats,
   eraProgress,
   evaluateDebuff,
+  rivalSeats,
+  scoreOf,
 } from './ic';
 import { rng } from './rng';
+import {
+  BallotInput,
+  ballotOptions,
+  countBallot,
+  ballotEventText,
+} from './ballot';
+import { runAgenda, runAwakening, runDormantEvents, worldEventText } from './dormants';
 import {
   BEATS_PER_TURN,
   ERAS,
@@ -100,6 +108,7 @@ export function createInitialState(config: MatchConfig): MatchState {
       debuffMissionTurn: null,
       vassalOf: null,
       createdAtTurn: 1,
+      awakened: false,
     });
     seats[seats.length - 1]!.magic = passiveForArea(area).magia;
   }
@@ -133,24 +142,16 @@ export function createInitialState(config: MatchConfig): MatchState {
   };
 }
 
-/** Techo de ventana por etapa del mundo cuando hay guerra (§5-A.11, §9). */
-export function windowCeiling(era: MatchState['era']): WindowId {
-  if (era === 'tribal') return '7d';
-  if (era === 'reinos') return '30d';
-  return '3m';
-}
-
-/** Opciones legales de la papeleta: desbloqueadas y bajo el techo de guerra. */
-export function ballotOptions(state: MatchState): WindowId[] {
-  if (!state.war) return [...state.windowsUnlocked];
-  const ceiling = WINDOW_LADDER.indexOf(windowCeiling(state.era));
-  return state.windowsUnlocked.filter((w) => WINDOW_LADDER.indexOf(w) <= ceiling);
-}
+// `windowCeiling` y `ballotOptions` viven en `ballot.ts`; se reexportan aquí
+// porque las pruebas y las capas de arriba históricamente los importan de aquí.
+export { windowCeiling, ballotOptions } from './ballot';
 
 /**
- * Votación de la mesa (§5-A.2). Solo votan humanos; aquí se modelan los
+ * Votación de la mesa simulada (§5-A.2). Solo votan humanos; aquí se modelan los
  * votantes de la mesa simulada con un perfil de preferencia por ventanas largas.
  * Mayoría simple de los votos emitidos; empate o sin quórum, se mantiene la actual.
+ * La Fase 4 usa la papeleta real (`countBallot`) y esta función queda para el
+ * modo de un jugador y para la simulación.
  */
 export function chooseWindow(state: MatchState): WindowId {
   if (state.windowPolicy === 'fixed' && state.fixedWindow !== null) return state.fixedWindow;
@@ -291,7 +292,21 @@ function grantShared(state: MatchState, key: string, winners: Seat[], pct: numbe
   });
 }
 
-export function resolveTurn(state: MatchState, orders: Order[]): MatchState {
+/**
+ * Resuelve el turno en curso. `ballot` es la papeleta real de la Fase 4
+ * (§5-A.2): los votos que los humanos emitieron durante este turno deciden
+ * la ventana con la que se juega. Sin papeleta, decide la mesa simulada
+ * (`chooseWindow`) igual que en las fases 0–3: ningún golden cambia.
+ *
+ * Precedencia de ventanas (A.11, A.12): ritmo fijado (`fixed`) > choque de
+ * civilizaciones (`windowOverride`) > restauración tras la paz > papeleta >
+ * mesa simulada. La papeleta nunca cambia un turno forzado ni un ritmo pactado.
+ */
+export function resolveTurn(
+  state: MatchState,
+  orders: Order[],
+  ballot?: BallotInput | null,
+): MatchState {
   const next: MatchState = structuredClone(state);
   if (next.finished) return next;
 
@@ -309,8 +324,28 @@ export function resolveTurn(state: MatchState, orders: Order[]): MatchState {
     if (override) next.windowOverride = null;
     const restored = !next.war ? next.windowBeforeWar : null;
     if (restored && next.windowsUnlocked.includes(restored)) {
+      // A.11: al firmar la paz la ventana vuelve sola; la papeleta de este
+      // turno se descarta (la mesa puede proponer de nuevo al turno siguiente).
       windowId = restored;
       next.windowBeforeWar = null;
+    } else if (ballot) {
+      const outcome = countBallot(next, ballot);
+      windowId = outcome.winner ?? next.windowId;
+      // A.2.7: los votos son secretos hasta el cierre; al cerrar el turno se
+      // publican con la crónica de este mismo turno.
+      next.events.push({
+        turn: next.turn,
+        visibility: 'public',
+        seatId: null,
+        kind: 'ballot',
+        text: ballotEventText(next, outcome),
+        data: {
+          proposal: ballot.proposal,
+          status: outcome.status,
+          counted: outcome.counted,
+          discarded: outcome.discarded,
+        },
+      });
     } else {
       windowId = chooseWindow(next);
     }
@@ -347,14 +382,17 @@ export function resolveTurn(state: MatchState, orders: Order[]): MatchState {
     seat.fidelity = Math.max(0.1, Math.min(1.5, seat.fidelity));
   }
 
-  // 7. Evento mundial: una tirada por turno.
+  // 7. Evento mundial: una tirada por turno. El 13 del §14 despierta a un
+  //    dios dormido (Noche de la traición); sin dormidos es el «mundo respira»
+  //    de siempre. La diana sale de los rivales: los malignos también sufren
+  //    el mundo, los dormidos que duermen no.
   const eventRand = rng(next.seed, next.turn, 7);
   const roll = 1 + Math.floor(eventRand() * 20);
-  const active = activeSeats(next);
+  const active = rivalSeats(next);
   if (active.length > 0) {
     const victim = active[Math.floor(eventRand() * active.length)];
     if (victim) {
-      const text = applyWorldEvent(next, victim, roll);
+      const text = worldEventText(next, victim, roll, eventRand);
       next.events.push({
         turn: next.turn,
         visibility: 'public',
@@ -365,6 +403,18 @@ export function resolveTurn(state: MatchState, orders: Order[]): MatchState {
       });
     }
   }
+
+  // 7-bis. Eventos de los dioses dormidos (§17.2, A.8): 15 % por turno en
+  //      ventanas de 1d a 6m, un evento por compás en 1y y 3y.
+  runDormantEvents(next);
+
+  // 7-ter. Despertar (§17.2): desde el turno 6, 10 % por turno de que un
+  //      dios dormido se convierta en dios maligno.
+  runAwakening(next);
+
+  // 7-quater. Agenda del dios maligno (§17.2): un acto por turno y por maligno
+  //      (atacar al líder, corromper, abrir una ruina demoníaca).
+  runAgenda(next);
 
   // 8-9. Contacto, choque y guerra (§9, §5-A.11).
   const warRand = rng(next.seed, next.turn, 77);
@@ -424,7 +474,9 @@ export function resolveTurn(state: MatchState, orders: Order[]): MatchState {
       }
     }
   } else {
-    const freeSeats = activeSeats(next).filter((s) => s.vassalOf === null);
+    // §10: los dioses malignos cuentan como rivales a vasallar; los dormidos
+    // que duermen no existen para la guerra.
+    const freeSeats = rivalSeats(next).filter((s) => s.vassalOf === null);
     if (freeSeats.length >= 2) {
       const a = freeSeats[Math.floor(warRand() * freeSeats.length)];
       const b = freeSeats[Math.floor(warRand() * freeSeats.length)];
@@ -561,7 +613,7 @@ export function resolveTurn(state: MatchState, orders: Order[]): MatchState {
   }
 
   // 14. Victoria y horizonte.
-  const remaining = activeSeats(next);
+  const remaining = rivalSeats(next);
   const lords = remaining.filter((s) => s.vassalOf === null);
   if (remaining.length >= 2 && lords.length === 1 && remaining.length > 1) {
     const lord = lords[0];
@@ -583,7 +635,8 @@ export function resolveTurn(state: MatchState, orders: Order[]): MatchState {
     let best: Seat | null = null;
     let bestScore = -Infinity;
     for (const seat of next.seats) {
-      if (seat.kind === 'dormant') continue;
+      // Puntúan civilizaciones y dioses malignos; el dormido que duerme no.
+      if (seat.kind === 'dormant' && !seat.awakened) continue;
       const value = scoreOf(next, seat);
       if (value > bestScore) {
         bestScore = value;
@@ -603,18 +656,8 @@ function moreMerit(a: Seat, b: Seat): boolean {
   return a.id < b.id;
 }
 
-export function scoreOf(state: MatchState, seat: Seat): number {
-  const vassals = state.seats.filter((s) => s.vassalOf === seat.id).length;
-  const milestones = Object.values(state.milestones).filter((id) => id === seat.id).length;
-  return (
-    vassals * 100 +
-    seat.divinity * 10 +
-    seat.believers / 10 +
-    seat.techs.length * 5 +
-    seat.relics * 5 +
-    milestones * 10
-  );
-}
+// La puntuación de §10 vive en `ic` desde la Fase 6 (la agenda del maligno
+// también la usa); `solo` y `lobby` la importan directamente de allí.
 
 export function copyState(state: MatchState): MatchState {
   return structuredClone(state);

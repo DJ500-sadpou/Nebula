@@ -3,8 +3,17 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-/** Crea la mesa de «La peor carta» y entra en ella (§19). */
-export function CreateMatch({ label = 'Empezar «La peor carta»' }: { label?: string }) {
+/**
+ * Crea una mesa de «La peor carta» (§19) o una sala multijugador (Fase 4) y
+ * entra en ella. La sala devuelve un código de 6 caracteres para invitar.
+ */
+export function CreateMatch({
+  label = 'Empezar «La peor carta»',
+  multi = false,
+}: {
+  label?: string;
+  multi?: boolean;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -13,13 +22,24 @@ export function CreateMatch({ label = 'Empezar «La peor carta»' }: { label?: s
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch('/api/match', { method: 'POST' });
+      const response = await fetch('/api/match', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(multi ? { mode: 'multi', config: {} } : {}),
+      });
       if (!response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          waking?: boolean;
+        };
         setError(
           payload.error === 'unconfigured'
             ? 'Falta la configuración del servidor (URL y service_role).'
-            : `No se pudo crear la mesa (${payload.error ?? response.status}).`,
+            : payload.error === 'limit'
+              ? 'Ya guías tres mundos a la vez (§21.1): termina o cierra uno antes de abrir otro.'
+              : payload.waking
+                ? 'El servidor está despertando: pruébalo de nuevo en unos segundos.'
+                : `No se pudo crear la mesa (${payload.error ?? response.status}).`,
         );
         return;
       }
@@ -40,7 +60,11 @@ export function CreateMatch({ label = 'Empezar «La peor carta»' }: { label?: s
         disabled={busy}
         className="cursor-pointer rounded border border-gold bg-gold px-5 py-2.5 text-sm font-semibold text-ink transition-colors hover:bg-parchment disabled:cursor-wait disabled:opacity-60"
       >
-        {busy ? 'Repartiendo cartas…' : label}
+        {busy
+          ? multi
+            ? 'Encendiendo la sala…'
+            : 'Repartiendo cartas…'
+          : label}
       </button>
       {error && <p className="text-sm text-blood">{error}</p>}
     </div>

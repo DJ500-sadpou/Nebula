@@ -27,6 +27,10 @@ const MIGRATIONS = [
   '20261025100000_schema.sql',
   '20261025100100_rls.sql',
   '20261025100200_turn_flow.sql',
+  '20261026100300_multiplayer.sql',
+  '20261026100400_malignant.sql',
+  '20261026100500_limits_retention.sql',
+  '20261026100600_audit_races.sql',
 ];
 
 const migrationSql = MIGRATIONS.map((file) =>
